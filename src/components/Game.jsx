@@ -15,16 +15,17 @@ const Game = () => {
 
   // Initialize socket connection
   useEffect(() => {
-    // Get the current host's address
-    const serverUrl = window.location.hostname === 'localhost' 
-      ? 'http://localhost:3001'
-      : `http://${window.location.hostname}:3001`;
-      
+    // Connect to the game server using the network IP
+    const serverUrl = 'http://10.1.10.160:3001';
+    console.log('Connecting to server:', serverUrl);
+    
     const newSocket = io(serverUrl, {
       transports: ['websocket', 'polling'],
-      cors: {
-        origin: '*'
-      }
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 20000,
+      forceNew: true
     });
 
     newSocket.on('connect', () => {
@@ -145,42 +146,98 @@ const Game = () => {
       const currentPlayer = players.find(p => p.id === socket?.id);
       return (
         <div className="game-status">
-          <div style={{ marginBottom: '10px' }}>
-            {players.length === 1 ? 'Waiting for more players...' : 
-             `${players.filter(p => p.ready).length}/${players.length} players ready`}
-          </div>
-          {players.length === 1 ? (
-            <div style={{ fontSize: '14px', opacity: 0.8, marginBottom: '10px' }}>
-              Share this game with friends to play together!
+          <div style={{ marginBottom: '20px', textAlign: 'center' }}>
+            <h2 style={{ marginBottom: '10px' }}>Online Racing Game</h2>
+            <div style={{ fontSize: '16px', marginBottom: '15px' }}>
+              {players.length === 1 ? 'Waiting for more players...' : 
+               `${players.filter(p => p.ready).length}/${players.length} players ready`}
             </div>
-          ) : null}
+            {players.length === 1 && (
+              <div style={{ 
+                backgroundColor: '#f8f9fa', 
+                padding: '15px', 
+                borderRadius: '8px',
+                marginBottom: '15px'
+              }}>
+                <h3 style={{ marginBottom: '10px' }}>Invite Friends!</h3>
+                <p style={{ marginBottom: '10px' }}>Share this link to play together:</p>
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '15px'
+                }}>
+                  <code style={{ 
+                    display: 'block', 
+                    padding: '10px', 
+                    backgroundColor: '#e9ecef',
+                    borderRadius: '4px',
+                    marginBottom: '5px'
+                  }}>
+                    http://10.1.10.160:3000
+                  </code>
+                  <img 
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=http://10.1.10.160:3000`}
+                    alt="QR Code"
+                    style={{
+                      width: '150px',
+                      height: '150px',
+                      backgroundColor: 'white',
+                      padding: '10px',
+                      borderRadius: '8px'
+                    }}
+                  />
+                  <div style={{ fontSize: '14px', opacity: 0.8 }}>
+                    Scan to join the game
+                  </div>
+                </div>
+                <p style={{ fontSize: '14px', opacity: 0.8 }}>Players must be on the same network</p>
+              </div>
+            )}
+          </div>
           <button 
             onClick={handleReady}
             className={`ready-button ${currentPlayer?.ready ? 'ready' : ''}`}
             style={{
               cursor: 'pointer',
-              padding: '10px 20px',
-              fontSize: '16px',
+              padding: '12px 24px',
+              fontSize: '18px',
               backgroundColor: currentPlayer?.ready ? '#27ae60' : '#3498db',
               color: 'white',
               border: 'none',
-              borderRadius: '5px',
+              borderRadius: '8px',
               transition: 'all 0.2s ease',
-              opacity: players.length === 1 ? 0.7 : 1
+              opacity: players.length === 1 ? 0.7 : 1,
+              width: '200px',
+              margin: '0 auto',
+              display: 'block'
             }}
             disabled={players.length === 1}
           >
             {currentPlayer?.ready ? '✓ Ready!' : 'Click when ready'}
           </button>
-          <div style={{ marginTop: '10px', fontSize: '14px' }}>
+          <div style={{ 
+            marginTop: '20px', 
+            fontSize: '16px',
+            backgroundColor: '#fff',
+            padding: '15px',
+            borderRadius: '8px',
+            maxWidth: '300px',
+            margin: '20px auto'
+          }}>
+            <h3 style={{ marginBottom: '10px', textAlign: 'center' }}>Players</h3>
             {players.map(p => (
               <div key={p.id} style={{ 
                 color: p.ready ? '#27ae60' : '#95a5a6',
-                marginBottom: '4px',
+                marginBottom: '8px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '5px'
+                gap: '8px',
+                padding: '8px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '4px'
               }}>
                 {p.ready ? '✓' : '○'} {p.name}
               </div>

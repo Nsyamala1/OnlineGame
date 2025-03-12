@@ -17,6 +17,7 @@
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "https-localhost": "^4.7.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-scripts": "^5.0.1",
