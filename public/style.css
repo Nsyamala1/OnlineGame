@@ -1,0 +1,89 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  
+  body, html {
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-family: Arial, sans-serif;
+  }
+  
+  #game-container {
+    position: relative;
+    width: 600px;
+    height: 200px;
+    background-color: #f0f0f0;
+    border: 2px solid black;
+    overflow: hidden;
+  }
+  
+  .player {
+    position: absolute;
+    left: 10px; /* Will be overridden dynamically */
+    bottom: 10px; /* Ground level */
+    width: 50px;
+    height: 100px;
+    transition: left 0.1s ease-in-out;
+  }
+  
+  /* Body Parts */
+  .head {
+    width: 30px;
+    height: 30px;
+    background: #3498db;
+    border-radius: 50%;
+    margin: 0 auto;
+  }
+  
+  .body {
+    width: 10px;
+    height: 40px;
+    background: #3498db;
+    margin: 0 auto;
+  }
+  
+  .left-arm, .right-arm {
+    width: 10px;
+    height: 30px;
+    background: #3498db;
+    position: absolute;
+    top: 40px;
+  }
+  
+  .left-arm {
+    left: 0;
+  }
+  
+  .right-arm {
+    right: 0;
+  }
+  
+  .left-leg, .right-leg {
+    width: 10px;
+    height: 30px;
+    background: #3498db;
+    position: absolute;
+    top: 80px;
+  }
+  
+  .left-leg {
+    left: 10px;
+  }
+  
+  .right-leg {
+    right: 10px;
+  }
+  
+  .finish-line {
+    position: absolute;
+    right: 20px; /* How far from the right edge */
+    bottom: 0;
+    width: 5px; /* Thin vertical line */
+    height: 100%; /* Full container height */
+    background-color: green;
+  }
+  
