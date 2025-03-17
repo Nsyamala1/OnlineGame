@@ -6,8 +6,11 @@ const cors = require('cors');
 const app = express();
 
 // Enable CORS for Express
-// Enable CORS for all origins
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST'],
+  credentials: false
+}));
 
 // Socket.io instance
 let io;
@@ -16,7 +19,9 @@ let io;
 const gameState = {
   players: [],
   status: 'waiting', // waiting, countdown, racing, finished
-  countdownTimer: null
+  countdownTimer: null,
+  aiPlayers: [],
+  aiInterval: null
 };
 
 // Game constants
@@ -25,8 +30,42 @@ const GAME_CONFIG = {
   COLORS: ['#3498db', '#e74c3c', '#2ecc71', '#f1c40f'],
   FINISH_LINE: 2000,
   MOVE_AMOUNT: 25,
-  START_POSITION: 50
+  START_POSITION: 50,
+  AI_MOVE_INTERVAL: [800, 1500], // Random interval between moves for AI
+  AI_NAMES: ['Bot Alice', 'Bot Bob', 'Bot Charlie', 'Bot David']
 };
+
+// Handle AI movement
+function startAIMovement() {
+  if (gameState.aiInterval) {
+    clearInterval(gameState.aiInterval);
+  }
+
+  gameState.aiInterval = setInterval(() => {
+    if (gameState.status === 'racing') {
+      gameState.aiPlayers.forEach(ai => {
+        if (ai.position < GAME_CONFIG.FINISH_LINE) {
+          ai.position = Math.min(
+            ai.position + GAME_CONFIG.MOVE_AMOUNT,
+            GAME_CONFIG.FINISH_LINE
+          );
+
+          if (ai.position >= GAME_CONFIG.FINISH_LINE) {
+            ai.wins++;
+            gameState.status = 'finished';
+          }
+        }
+      });
+
+      io.emit('updateGame', {
+        players: [...gameState.players, ...gameState.aiPlayers],
+        gameState: gameState.status
+      });
+    }
+  }, Math.floor(Math.random() * 
+    (GAME_CONFIG.AI_MOVE_INTERVAL[1] - GAME_CONFIG.AI_MOVE_INTERVAL[0]) + 
+    GAME_CONFIG.AI_MOVE_INTERVAL[0]));
+}
 
 // Reset game state
 function resetGame() {
@@ -34,13 +73,21 @@ function resetGame() {
     player.position = GAME_CONFIG.START_POSITION;
     player.ready = false;
   });
+  gameState.aiPlayers.forEach(ai => {
+    ai.position = GAME_CONFIG.START_POSITION;
+    ai.ready = true;
+  });
   if (gameState.countdownTimer) {
     clearInterval(gameState.countdownTimer);
     gameState.countdownTimer = null;
   }
+  if (gameState.aiInterval) {
+    clearInterval(gameState.aiInterval);
+    gameState.aiInterval = null;
+  }
   gameState.status = 'waiting';
   io.emit('updateGame', { 
-    players: gameState.players, 
+    players: [...gameState.players, ...gameState.aiPlayers], 
     gameState: gameState.status 
   });
 }
@@ -50,7 +97,7 @@ function startCountdown() {
   gameState.status = 'countdown';
   let count = 3;
   io.emit('updateGame', { 
-    players: gameState.players, 
+    players: [...gameState.players, ...gameState.aiPlayers], 
     gameState: gameState.status, 
     countdown: count 
   });
@@ -59,15 +106,16 @@ function startCountdown() {
     count--;
     if (count > 0) {
       io.emit('updateGame', { 
-        players: gameState.players, 
+        players: [...gameState.players, ...gameState.aiPlayers], 
         gameState: gameState.status, 
         countdown: count 
       });
     } else {
       clearInterval(gameState.countdownTimer);
       gameState.status = 'racing';
+      startAIMovement();
       io.emit('updateGame', { 
-        players: gameState.players, 
+        players: [...gameState.players, ...gameState.aiPlayers], 
         gameState: gameState.status 
       });
     }
@@ -80,10 +128,11 @@ async function setupServer() {
 
   io = socketIo(server, {
     cors: {
-      origin: ['http://localhost:3000', 'http://10.1.10.160:3000'],
+      origin: '*',
       methods: ['GET', 'POST'],
-      credentials: true
+      credentials: false
     },
+    transports: ['polling', 'websocket'],
     pingTimeout: 60000,
     pingInterval: 25000
   });
@@ -117,7 +166,35 @@ async function startServer() {
 
   const { server } = await setupServer();
 
-  // Set up socket event handlers
+  // Add AI players
+function addAIPlayers() {
+  // Clear existing AI players
+  gameState.aiPlayers = [];
+  
+  // Add AI players if there's only one human player
+  if (gameState.players.length === 1) {
+    const numAI = 1; // Add one AI opponent
+    for (let i = 0; i < numAI; i++) {
+      const aiIndex = gameState.players.length + i;
+      if (aiIndex < GAME_CONFIG.MAX_PLAYERS) {
+        gameState.aiPlayers.push({
+          id: `ai-${i}`,
+          position: GAME_CONFIG.START_POSITION,
+          name: GAME_CONFIG.AI_NAMES[i],
+          lane: aiIndex,
+          color: GAME_CONFIG.COLORS[aiIndex],
+          ready: true,
+          wins: 0,
+          isAI: true
+        });
+      }
+    }
+  }
+}
+
+
+
+// Set up socket event handlers
   io.on('connection', (socket) => {
     console.log('New player connected: ' + socket.id);
 
@@ -144,12 +221,38 @@ async function startServer() {
       gameState: gameState.status 
     });
 
-    socket.on('setName', (name) => {
+    socket.on('setName', ({ name, mode }) => {
       const player = gameState.players.find(p => p.id === socket.id);
       if (player) {
         player.name = name;
+        
+        // Clear existing AI players
+        gameState.aiPlayers = [];
+        
+        // Add AI players if AI mode is selected
+        if (mode === 'ai') {
+          const numAiPlayers = 3; // Add 3 AI players
+          for (let i = 0; i < numAiPlayers; i++) {
+            const aiIndex = gameState.players.length + i;
+            if (aiIndex < GAME_CONFIG.MAX_PLAYERS) {
+              gameState.aiPlayers.push({
+                id: `ai-${i}`,
+                name: GAME_CONFIG.AI_NAMES[i],
+                position: GAME_CONFIG.START_POSITION,
+                lane: aiIndex,
+                color: GAME_CONFIG.COLORS[aiIndex],
+                ready: true,
+                wins: 0,
+                isAI: true
+              });
+            }
+          }
+          // Start AI movement when in AI mode
+          startAIMovement();
+        }
+        
         io.emit('updateGame', { 
-          players: gameState.players, 
+          players: [...gameState.players, ...gameState.aiPlayers], 
           gameState: gameState.status 
         });
       }
@@ -161,15 +264,16 @@ async function startServer() {
         player.ready = !player.ready;
         console.log(`Player ${player.name} ready state: ${player.ready}`);
         
-        // Check if all players are ready and there are at least 2 players
-        const allReady = gameState.players.length >= 2 && gameState.players.every(p => p.ready);
-        console.log(`Players ready: ${gameState.players.filter(p => p.ready).length}/${gameState.players.length}`);
+        // Check if all players (including AI) are ready
+        const allPlayersReady = gameState.players.every(p => p.ready);
+        const totalPlayers = gameState.players.length + gameState.aiPlayers.length;
         
-        if (allReady) {
+        // Start game if all players are ready and there's at least one human and one AI
+        if (allPlayersReady && totalPlayers >= 2) {
           startCountdown();
         } else {
           io.emit('updateGame', { 
-            players: gameState.players, 
+            players: [...gameState.players, ...gameState.aiPlayers], 
             gameState: gameState.status 
           });
         }

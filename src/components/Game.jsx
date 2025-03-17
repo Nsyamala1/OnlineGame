@@ -5,6 +5,7 @@ import './Game.css';
 const Game = () => {
   const [gameState, setGameState] = useState({
     players: [],
+    aiPlayers: [],
     gameState: 'waiting',
     countdown: null
   });
@@ -12,20 +13,21 @@ const Game = () => {
   const [playerName, setPlayerName] = useState('');
   const [isNameSubmitted, setIsNameSubmitted] = useState(false);
   const [error, setError] = useState('');
+  const [showLandingPage, setShowLandingPage] = useState(true);
+  const [gameMode, setGameMode] = useState('multiplayer'); // 'multiplayer' or 'ai'
 
   // Initialize socket connection
   useEffect(() => {
-    // Connect to the game server using the network IP
-    const serverUrl = 'http://10.1.10.160:3001';
+    // Connect to the game server using dynamic hostname
+    const serverUrl = `http://${window.location.hostname}:3001`;
     console.log('Connecting to server:', serverUrl);
     
     const newSocket = io(serverUrl, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
-      timeout: 20000,
-      forceNew: true
+      timeout: 10000
     });
 
     newSocket.on('connect', () => {
@@ -54,27 +56,49 @@ const Game = () => {
   const handleNameSubmit = (e) => {
     e.preventDefault();
     if (playerName.trim() && socket) {
-      socket.emit('setName', playerName);
+      socket.emit('setName', { name: playerName, mode: gameMode });
       setIsNameSubmitted(true);
+      setShowLandingPage(false);
     }
   };
 
-  const handleMove = useCallback(() => {
-    if (socket && isNameSubmitted) {
-      socket.emit('move');
-      // Scroll to follow the current player
+  // Auto-scroll effect when player position changes
+  useEffect(() => {
+    const currentPlayer = gameState.players.find(p => p.id === socket?.id);
+    if (currentPlayer && gameState.gameState === 'racing') {
+      const container = document.querySelector('.game-content');
+      if (container) {
+        const targetScroll = Math.max(0, currentPlayer.position - window.innerWidth / 3);
+        container.scrollTo({
+          left: targetScroll,
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [gameState.players, socket?.id, gameState.gameState]);
+
+  // Ensure initial scroll position is correct when game starts
+  useEffect(() => {
+    if (gameState.gameState === 'racing') {
       const currentPlayer = gameState.players.find(p => p.id === socket?.id);
       if (currentPlayer) {
-        const container = document.querySelector('.game-wrapper');
+        const container = document.querySelector('.game-content');
         if (container) {
+          const targetScroll = Math.max(0, currentPlayer.position - window.innerWidth / 3);
           container.scrollTo({
-            left: Math.max(0, currentPlayer.position - window.innerWidth / 3),
-            behavior: 'smooth'
+            left: targetScroll,
+            behavior: 'auto'
           });
         }
       }
     }
-  }, [socket, isNameSubmitted, gameState.players]);
+  }, [gameState.gameState, socket?.id]);
+
+  const handleMove = useCallback(() => {
+    if (socket && isNameSubmitted) {
+      socket.emit('move');
+    }
+  }, [socket, isNameSubmitted]);
 
   const handleReady = useCallback((e) => {
     e.preventDefault();
@@ -107,25 +131,34 @@ const Game = () => {
   }, [handleInteraction]);
 
   const Player = ({ position, id, name, lane, color, ready, wins }) => {
-    const laneHeight = window.innerHeight - 100; // Full height minus margins
-    const laneSpacing = laneHeight / 5; // Divide height into 5 sections (4 lanes + margins)
-    const laneOffset = (lane + 1) * laneSpacing;
+    const laneHeight = window.innerHeight - 200; // Reduced total height
+    const numLanes = 4; // Fixed number of lanes
+    const laneSpacing = laneHeight / numLanes;
+    const laneOffset = 100 + (lane * laneSpacing); // Start at 100px from top
     const isWinner = gameState.gameState === 'finished' && position >= 2000;
     return (
       <div 
         className={`player ${gameState.gameState === 'racing' ? 'racing' : ''} ${isWinner ? 'winner' : ''}`}
         style={{ 
           left: `${position}px`,
-          top: `${laneOffset}px`
+          top: `${laneOffset}px`,
+          color: color
         }} 
         id={id}
       >
+        <div className="stick-figure">
+          <div className="head" />
+          <div className="body" />
+          <div className="left-arm" />
+          <div className="right-arm" />
+          <div className="left-leg" />
+          <div className="right-leg" />
+        </div>
         <div className="player-info">
-          <div className="player-name">{name}</div>
-          <div className="player-stats">Wins: {wins}</div>
-          {gameState.gameState === 'waiting' && (
-            <div className="player-ready">{ready ? '✓ Ready' : 'Not Ready'}</div>
-          )}
+          <div className="player-name">
+            {name}
+            <span className={`ready-indicator ${ready ? 'ready' : ''}`}></span>
+          </div>
         </div>
         <div className="stick-figure" style={{ color: color }}>
           <div className="head" />
@@ -289,58 +322,100 @@ const Game = () => {
     return null;
   };
 
-  if (!isNameSubmitted) {
-    return (
-      <div className="name-form-container">
-        {error && <div className="error-message">{error}</div>}
-        <form onSubmit={handleNameSubmit} className="name-form">
-          <input
-            type="text"
-            value={playerName}
-            onChange={(e) => setPlayerName(e.target.value)}
-            placeholder="Enter your name"
-            maxLength="15"
-            required
-          />
-          <button type="submit">Start Game</button>
-        </form>
-      </div>
-    );
-  }
-
   return (
-    <div className="game-wrapper">
-      <GameStatus />
-      <div 
-        id="game-container" 
-        onClick={gameState.gameState === 'racing' ? handleInteraction : undefined}
-        className={gameState.gameState === 'racing' ? 'racing' : ''}
-      >
-        {gameState.players.map(player => (
-          <Player 
-            key={player.id} 
-            position={player.position} 
-            id={player.id}
-            name={player.name || 'Anonymous'}
-            lane={player.lane}
-            color={player.color}
-            ready={player.ready}
-            wins={player.wins}
-          />
-        ))}
-        <div className="finish-line" />
-        {[...Array(3)].map((_, i) => {
-          const laneHeight = window.innerHeight - 100;
-          const laneSpacing = laneHeight / 5;
-          return (
+    <div className="game-container">
+      {showLandingPage ? (
+        <div className="landing-page">
+          <div className="landing-content">
+            <h1>Online Racing Game</h1>
+            <p>Choose your game mode and start racing!</p>
+            {error && <div className="error-message">{error}</div>}
+            <form onSubmit={handleNameSubmit} className="name-form">
+              <input
+                type="text"
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value)}
+                placeholder="Enter your name"
+                maxLength={15}
+                required
+              />
+              <div className="game-mode-selector">
+                <h3>Choose Game Mode</h3>
+                <div className="mode-buttons">
+                  <button
+                    type="button"
+                    className={`mode-button ${gameMode === 'multiplayer' ? 'active' : ''}`}
+                    onClick={() => setGameMode('multiplayer')}
+                  >
+                    <span className="mode-icon">👥</span>
+                    <span className="mode-text">Play with Friends</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`mode-button ${gameMode === 'ai' ? 'active' : ''}`}
+                    onClick={() => setGameMode('ai')}
+                  >
+                    <span className="mode-icon">🤖</span>
+                    <span className="mode-text">Play with AI</span>
+                  </button>
+                </div>
+              </div>
+              <button type="submit" className="start-button">Start Game</button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <div className="game-wrapper">
+          <div className="game-header">
+            <div className="game-status">
+              <GameStatus />
+            </div>
+            <button 
+              onClick={() => {
+                setShowLandingPage(true);
+                socket.disconnect();
+                window.location.reload();
+              }} 
+              className="leave-button"
+            >
+              Leave Game
+            </button>
+          </div>
+          
+          <div className="game-content">
             <div 
-              key={i} 
-              className="lane-divider" 
-              style={{ top: `${(i + 1) * laneSpacing}px` }} 
-            />
-          );
-        })}
-      </div>
+              id="game-container" 
+              onClick={gameState.gameState === 'racing' ? handleInteraction : undefined}
+              className={`${gameState.gameState === 'racing' ? 'racing' : ''}`}
+            >
+              <div className="finish-line" />
+              {[...Array(3)].map((_, i) => {
+                const laneHeight = window.innerHeight - 200;
+                const laneSpacing = laneHeight / 4;
+                return (
+                  <div 
+                    key={i} 
+                    className="lane-divider" 
+                    style={{ top: `${100 + ((i + 1) * laneSpacing)}px` }} 
+                  />
+                );
+              })}
+              {[...gameState.players, ...(gameState.aiPlayers || [])].map(player => (
+                <Player 
+                  key={player.id} 
+                  position={player.position} 
+                  id={player.id}
+                  name={player.name || 'Anonymous'}
+                  lane={player.lane}
+                  color={player.color}
+                  ready={player.ready}
+                  wins={player.wins}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

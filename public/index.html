@@ -3,10 +3,34 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Multiplayer Run to the Goal</title>
-  <link rel="stylesheet" href="/style.css">
+  <title>Racing Game</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
 </head>
 <body>
   <div id="root"></div>
+</body>
+</html>
+
+  <div id="game-page" class="page">
+    <div id="game-header">
+      <div id="player-info"></div>
+      <div id="status-display"></div>
+    </div>
+    <div id="game-container">
+      <div id="track">
+        <div id="finish-line"></div>
+      </div>
+    </div>
+    <div id="game-controls">
+      <button id="ready-button" disabled>Ready</button>
+      <button id="leave-game">Leave Game</button>
+    </div>
+    <div id="player-list"></div>
+    <div id="game-instructions">
+      <p>Press <span class="key">SPACE</span> to run when the race starts!</p>
+    </div>
+  </div>
+
+  <script src="/game.js"></script>
 </body>
 </html>
