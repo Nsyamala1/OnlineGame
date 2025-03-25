@@ -31,7 +31,7 @@ const GAME_CONFIG = {
   FINISH_LINE: 2000,
   MOVE_AMOUNT: 25,
   START_POSITION: 50,
-  AI_MOVE_INTERVAL: [800, 1500], // Random interval between moves for AI
+  AI_MOVE_INTERVAL: [800, 1500], // Random interval between moves for ai
   AI_NAMES: ['Bot Alice', 'Bot Bob', 'Bot Charlie', 'Bot David']
 };
 
