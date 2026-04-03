@@ -112,9 +112,17 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 2rem;
+  padding: 0.6rem 1.5rem;
   background-color: white;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  position: relative;
+}
+
+.game-header-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #2d3436;
 }
 
 .player-info {
@@ -630,13 +638,27 @@
   text-align: center;
   font-size: 16px;
   position: fixed;
-  top: 20px;
+  top: 60px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 100;
   color: white;
   backdrop-filter: blur(5px);
   pointer-events: all;
+}
+
+.game-status.racing-hint {
+  background-color: rgba(52, 152, 219, 0.85);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 8px 20px;
+  pointer-events: none;
+  animation: fadeInDown 0.4s ease;
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 @keyframes celebrate {
@@ -750,4 +772,91 @@ button.ready {
 
 button.ready:hover {
   background-color: #219a52;
+}
+
+/* ── Wins Badge ── */
+.wins-badge {
+  font-size: 11px;
+  font-weight: 700;
+  background: #f1c40f;
+  color: #2d3436;
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* ── Progress Bar ── */
+.progress-bar-container {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  border-radius: 10px;
+  padding: 10px 16px;
+  min-width: 280px;
+  max-width: 420px;
+  width: 90vw;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progress-label {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 80px;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-track {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.2s ease-out;
+}
+
+.progress-pct {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  min-width: 32px;
+  text-align: right;
+}
+
+/* ── Tap Ripple ── */
+.tap-ripple {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  margin-left: -30px;
+  margin-top: -30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  animation: ripple-expand 0.6s ease-out forwards;
+  z-index: 5;
+}
+
+@keyframes ripple-expand {
+  0%   { transform: scale(0); opacity: 1; }
+  100% { transform: scale(3); opacity: 0; }
 }

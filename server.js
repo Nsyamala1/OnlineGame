@@ -166,34 +166,6 @@ async function startServer() {
 
   const { server } = await setupServer();
 
-  // Add AI players
-function addAIPlayers() {
-  // Clear existing AI players
-  gameState.aiPlayers = [];
-  
-  // Add AI players if there's only one human player
-  if (gameState.players.length === 1) {
-    const numAI = 1; // Add one AI opponent
-    for (let i = 0; i < numAI; i++) {
-      const aiIndex = gameState.players.length + i;
-      if (aiIndex < GAME_CONFIG.MAX_PLAYERS) {
-        gameState.aiPlayers.push({
-          id: `ai-${i}`,
-          position: GAME_CONFIG.START_POSITION,
-          name: GAME_CONFIG.AI_NAMES[i],
-          lane: aiIndex,
-          color: GAME_CONFIG.COLORS[aiIndex],
-          ready: true,
-          wins: 0,
-          isAI: true
-        });
-      }
-    }
-  }
-}
-
-
-
 // Set up socket event handlers
   io.on('connection', (socket) => {
     console.log('New player connected: ' + socket.id);
@@ -247,8 +219,6 @@ function addAIPlayers() {
               });
             }
           }
-          // Start AI movement when in AI mode
-          startAIMovement();
         }
         
         io.emit('updateGame', { 
@@ -297,9 +267,9 @@ function addAIPlayers() {
           gameState.status = 'finished';
         }
 
-        io.emit('updateGame', { 
-          players: gameState.players, 
-          gameState: gameState.status 
+        io.emit('updateGame', {
+          players: [...gameState.players, ...gameState.aiPlayers],
+          gameState: gameState.status
         });
       }
     });
@@ -320,14 +290,18 @@ function addAIPlayers() {
           p.lane = i;
           p.color = GAME_CONFIG.COLORS[i];
         });
-        
+
         // Reset game if not enough players or if a player disconnects during countdown/racing
-        if (gameState.players.length <= 1 || 
-            gameState.status === 'countdown' || 
+        if (gameState.players.length <= 1 ||
+            gameState.status === 'countdown' ||
             gameState.status === 'racing') {
           if (gameState.countdownTimer) {
             clearInterval(gameState.countdownTimer);
             gameState.countdownTimer = null;
+          }
+          if (gameState.aiInterval) {
+            clearInterval(gameState.aiInterval);
+            gameState.aiInterval = null;
           }
           gameState.status = 'waiting';
           gameState.players.forEach(p => {
@@ -335,47 +309,9 @@ function addAIPlayers() {
             p.ready = false;
           });
         }
-        io.emit('updateGame', { 
-          players: gameState.players, 
-          gameState: gameState.status 
-        });
-      }
-    });
-
-    socket.on('requestRestart', () => {
-      if (gameState.status === 'finished') {
-        resetGame();
-      }
-    });
-
-    socket.on('disconnect', () => {
-      console.log('Player disconnected: ' + socket.id);
-      const index = gameState.players.findIndex(p => p.id === socket.id);
-      if (index !== -1) {
-        gameState.players.splice(index, 1);
-        // Reassign lanes and colors for remaining players
-        gameState.players.forEach((p, i) => {
-          p.lane = i;
-          p.color = GAME_CONFIG.COLORS[i];
-        });
-        
-        // Reset game if not enough players or if a player disconnects during countdown/racing
-        if (gameState.players.length <= 1 || 
-            gameState.status === 'countdown' || 
-            gameState.status === 'racing') {
-          if (gameState.countdownTimer) {
-            clearInterval(gameState.countdownTimer);
-            gameState.countdownTimer = null;
-          }
-          gameState.status = 'waiting';
-          gameState.players.forEach(p => {
-            p.position = GAME_CONFIG.START_POSITION;
-            p.ready = false;
-          });
-        }
-        io.emit('updateGame', { 
-          players: gameState.players, 
-          gameState: gameState.status 
+        io.emit('updateGame', {
+          players: [...gameState.players, ...gameState.aiPlayers],
+          gameState: gameState.status
         });
       }
     });
