@@ -2,20 +2,38 @@ const path = require('path');
 const express = require('express');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 
+// ── HTTP security headers ────────────────────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: false,   // disabled: Phaser uses inline canvas/WebGL
+  crossOriginEmbedderPolicy: false,
+}));
+
+// ── CORS ─────────────────────────────────────────────────────────────────────
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST'],
   credentials: false
 }));
 
+// ── HTTP rate limiting (per IP, protects the Express endpoints) ──────────────
+app.use(rateLimit({
+  windowMs: 60 * 1000,   // 1 minute window
+  max: 120,              // max 120 HTTP requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many requests — slow down.',
+}));
+
 let io;
 
 const gameState = {
   players: [],
-  status: 'waiting', // waiting, countdown, racing, finished
+  status: 'waiting',
   countdownTimer: null,
   aiPlayers: [],
   aiInterval: null
@@ -28,8 +46,24 @@ const GAME_CONFIG = {
   MOVE_AMOUNT: 25,
   START_POSITION: 50,
   AI_MOVE_INTERVAL: [800, 1500],
-  AI_NAMES: ['Bot Alice', 'Bot Bob', 'Bot Charlie', 'Bot David']
+  AI_NAMES: ['Bot Alice', 'Bot Bob', 'Bot Charlie', 'Bot David'],
+  // Security
+  MOVE_COOLDOWN_MS: 80,     // max ~12 legitimate taps/sec; scripts emit 100s/sec
+  MAX_NAME_LENGTH: 15,
+  MAX_EVENTS_PER_SEC: 20,   // hard cap on all socket events per socket per second
 };
+
+// ── Input sanitisation ────────────────────────────────────────────────────────
+function sanitizeName(raw) {
+  if (typeof raw !== 'string') return null;
+  // Strip HTML tags, trim whitespace, enforce length
+  const cleaned = raw
+    .replace(/<[^>]*>/g, '')   // no HTML
+    .replace(/[^\x20-\x7E\u00A0-\uFFFF]/g, '') // printable chars only
+    .trim()
+    .slice(0, GAME_CONFIG.MAX_NAME_LENGTH);
+  return cleaned.length >= 1 ? cleaned : null;
+}
 
 function allPlayers() {
   return [...gameState.players, ...gameState.aiPlayers];
@@ -94,6 +128,22 @@ function startCountdown() {
   }, 1000);
 }
 
+// ── Per-socket rate limiter factory ──────────────────────────────────────────
+// Returns a function that returns true when the call is allowed, false when throttled.
+function makeSocketRateLimiter(maxPerSec) {
+  let count = 0;
+  let windowStart = Date.now();
+  return function allow() {
+    const now = Date.now();
+    if (now - windowStart >= 1000) {
+      count = 0;
+      windowStart = now;
+    }
+    count++;
+    return count <= maxPerSec;
+  };
+}
+
 async function setupServer() {
   const server = require('http').createServer(app);
 
@@ -101,7 +151,8 @@ async function setupServer() {
     cors: { origin: '*', methods: ['GET', 'POST'], credentials: false },
     transports: ['polling', 'websocket'],
     pingTimeout: 60000,
-    pingInterval: 25000
+    pingInterval: 25000,
+    maxHttpBufferSize: 1e4,   // 10 KB max payload per message
   });
 
   return { server, io };
@@ -127,12 +178,21 @@ async function startServer() {
     console.log('Client connected: ' + socket.id);
 
     let isPlayer = false;
+    let lastMoveAt = 0;                                // anti-cheat: move cooldown
+    const allowEvent = makeSocketRateLimiter(GAME_CONFIG.MAX_EVENTS_PER_SEC);
+
+    // Wrap every incoming event with the general rate limiter
+    socket.use(([event], next) => {
+      if (!allowEvent()) {
+        console.warn(`Rate limit exceeded — socket ${socket.id} (event: ${event})`);
+        return; // silently drop; don't call next()
+      }
+      next();
+    });
 
     // ── Display screen (TV/laptop) ──────────────────────────────────────────
-    // Joins as spectator — does NOT create a player slot
     socket.on('joinAsDisplay', () => {
       console.log('Display screen connected: ' + socket.id);
-      // Send current state immediately so the display can render
       socket.emit('updateGame', {
         players: allPlayers(),
         gameState: gameState.status
@@ -140,12 +200,20 @@ async function startServer() {
     });
 
     // ── Player (iPad/phone) ─────────────────────────────────────────────────
-    // Player is only created here — not on raw connection
-    socket.on('setName', ({ name, mode }) => {
+    socket.on('setName', ({ name, mode } = {}) => {
+      // Validate & sanitise name
+      const safeName = sanitizeName(name);
+      if (!safeName) {
+        socket.emit('error', { message: 'Invalid name.' });
+        return;
+      }
+
+      // Validate mode
+      const safeMode = mode === 'ai' ? 'ai' : 'multiplayer';
+
       if (isPlayer) {
-        // Player already exists — just update name (e.g. reconnect)
         const player = gameState.players.find(p => p.id === socket.id);
-        if (player) { player.name = name; broadcastUpdate(); }
+        if (player) { player.name = safeName; broadcastUpdate(); }
         return;
       }
 
@@ -160,16 +228,15 @@ async function startServer() {
       gameState.players.push({
         id: socket.id,
         position: GAME_CONFIG.START_POSITION,
-        name,
+        name: safeName,
         lane,
         color: GAME_CONFIG.COLORS[lane],
         ready: false,
         wins: 0
       });
 
-      // AI opponents
       gameState.aiPlayers = [];
-      if (mode === 'ai') {
+      if (safeMode === 'ai') {
         for (let i = 0; i < 3; i++) {
           const aiLane = gameState.players.length + i;
           if (aiLane < GAME_CONFIG.MAX_PLAYERS) {
@@ -209,6 +276,11 @@ async function startServer() {
 
     socket.on('move', () => {
       if (!isPlayer || gameState.status !== 'racing') return;
+
+      // ── Anti-cheat: enforce minimum time between moves ──────────────────
+      const now = Date.now();
+      if (now - lastMoveAt < GAME_CONFIG.MOVE_COOLDOWN_MS) return; // drop silent
+      lastMoveAt = now;
 
       const player = gameState.players.find(p => p.id === socket.id);
       if (!player || player.position >= GAME_CONFIG.FINISH_LINE) return;
