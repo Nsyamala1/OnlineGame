@@ -99,6 +99,16 @@ export default class WaitingScene extends Phaser.Scene {
       this._playerRows.push({ dot, nameTxt })
     }
 
+    // Hide ready button and show spectator badge for display clients
+    const isDisplay = this.registry.get('clientRole') === 'display'
+    if (isDisplay) {
+      this.add.text(cx, height - 60, '📺  DISPLAY MODE  —  Spectating', {
+        fontSize: '16px', fontFamily: '"Arial Black", Arial',
+        color: '#3498db', backgroundColor: 'rgba(52,152,219,0.15)',
+        padding: { x: 16, y: 10 },
+      }).setOrigin(0.5)
+    }
+
     // Ready button
     this._readyBtn = this.add.text(cx, height - 60, '  READY UP  ', {
       fontSize: '24px',
@@ -114,6 +124,7 @@ export default class WaitingScene extends Phaser.Scene {
     this._readyBtn.on('pointerout', () => {
       if (!this._isReady) this._readyBtn.setStyle({ backgroundColor: '#f1c40f' })
     })
+    this._readyBtn.setVisible(!isDisplay)
     this._readyBtn.on('pointerdown', () => this._toggleReady())
 
     // Leave button
@@ -188,10 +199,14 @@ export default class WaitingScene extends Phaser.Scene {
     const myId = socket ? socket.id : null
 
     if (gameState === 'racing') {
-      // Clean up socket listener
       if (socket) socket.off('updateGame')
       this._destroyAllCharacters()
-      this.scene.start('Race', { players, gameState })
+      const role = this.registry.get('clientRole')
+      if (role === 'display') {
+        this.scene.start('Race', { players, gameState })
+      } else {
+        this.scene.start('Player', { gameData: data })
+      }
       return
     }
 
