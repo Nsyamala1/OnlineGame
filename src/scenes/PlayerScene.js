@@ -3,13 +3,18 @@ import { getSocket, disconnect } from '../socket.js'
 import PlayerCharacter from '../PlayerCharacter.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PlayerScene  — the iPad / phone controller screen
-//  Kids only see their own character here. The full race plays on the TV.
+//  PlayerScene  —  iPad / phone controller screen
+//
+//  Running mechanic: alternate LEFT and RIGHT fingers (like actual running legs)
+//  Left half of screen = left foot, right half = right foot
+//  Tapping the same side twice in a row doesn't count — must alternate L→R→L→R
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FINISH_LINE = 2000
-const RANK_LABELS = ['🥇 1st!', '🥈 2nd', '🥉 3rd', '4th']
-const RANK_COLORS = ['#f1c40f', '#aaaaaa', '#cd7f32', '#95a5a6']
+const RANK_LABELS  = ['🥇 1st!', '🥈 2nd', '🥉 3rd', '4th']
+const RANK_COLORS  = ['#f1c40f', '#c0c0c0', '#cd7f32', '#95a5a6']
+const LEFT_COLOR   = 0x3498db   // blue for left foot
+const RIGHT_COLOR  = 0x9b59b6   // purple for right foot
 
 export default class PlayerScene extends Phaser.Scene {
   constructor() {
@@ -25,202 +30,237 @@ export default class PlayerScene extends Phaser.Scene {
     const socket = getSocket()
     if (!socket) { this.scene.start('Landing'); return }
 
-    this._myId = socket.id
+    this._myId       = socket.id
     this._gameStatus = this._gameData.gameState || 'waiting'
-    this._ripples = []
+    this._lastSide   = null   // 'left' | 'right' | null (null = first step, any side ok)
+    this._prevState  = null
+    this._finishShown = false
+    this._otherDots  = []
+
+    // Enable multi-touch so both fingers are tracked simultaneously
+    this.input.addPointer(3)
 
     this._buildBackground(width, height)
     this._buildCharacter(width, height)
     this._buildStatusArea(width, height)
-    this._buildTapZone(width, height)
+    this._buildRunZones(width, height)
     this._buildProgressBar(width, height)
 
-    // Update from server
     socket.off('updateGame')
     socket.on('updateGame', (data) => this._onUpdate(data))
-
-    // Process initial state
     this._onUpdate(this._gameData)
 
-    // Make the whole lower area tappable
+    // Each finger tap fires a separate pointerdown event
     this.input.on('pointerdown', (ptr) => {
-      if (this._gameStatus === 'racing') {
-        this._sendMove(ptr.x, ptr.y)
-      }
+      if (this._gameStatus === 'racing') this._handleStep(ptr.x, ptr.y)
     })
   }
 
-  // ── Background ─────────────────────────────────────────────────────────────
+  // ── Background ──────────────────────────────────────────────────────────────
   _buildBackground(width, height) {
     const g = this.add.graphics()
-    g.fillGradientStyle(0x0d0d2b, 0x0d0d2b, 0x1a1a3e, 0x16213e, 1)
+    g.fillGradientStyle(0x0d0d2b, 0x0d0d2b, 0x16213e, 0x1a1a3e, 1)
     g.fillRect(0, 0, width, height)
-    this._bg = g
   }
 
-  // ── The player's character — large and centered ─────────────────────────────
+  // ── Character (large, centred in top portion) ───────────────────────────────
   _buildCharacter(width, height) {
-    // Player shown in the top 55% of the screen, centred
     const charX = width / 2
-    const charY = height * 0.38
+    const charY = height * 0.30
 
-    // Spotlight glow under character
     const glow = this.add.graphics()
     glow.fillStyle(0xffffff, 0.04)
-    glow.fillEllipse(charX, charY + 10, 200, 60)
-    this._glowGraphic = glow
+    glow.fillEllipse(charX, charY + 12, 220, 60)
 
-    // Bigger scale for the character on iPad
     const myData = this._gameData.players?.find(p => p.id === this._myId)
-    const color = myData?.color || '#3498db'
-    const name = myData?.name || this.registry.get('playerName') || 'Player'
-    const wins = myData?.wins || 0
+    const color  = myData?.color  || '#3498db'
+    const name   = myData?.name   || this.registry.get('playerName') || 'Player'
+    const wins   = myData?.wins   || 0
 
     this._char = new PlayerCharacter(this, charX, charY, { color, name, wins, isMe: true })
-    // Scale up the character — it's the star of this screen
     this._char.posContainer.setScale(1.8)
-
     this._char.playIdle()
   }
 
-  // ── Status text area (top of screen) ───────────────────────────────────────
+  // ── Status + rank text ──────────────────────────────────────────────────────
   _buildStatusArea(width, height) {
-    // Game status pill at top
-    this._statusBg = this.add.graphics()
-    this._statusText = this.add.text(width / 2, height * 0.08, '', {
-      fontSize: '22px', fontFamily: '"Arial Black", Arial', color: '#ffffff',
+    this._statusText = this.add.text(width / 2, height * 0.07, '', {
+      fontSize: '20px', fontFamily: '"Arial Black", Arial', color: '#ffffff',
       shadow: { offsetX: 1, offsetY: 1, color: '#000', blur: 4, fill: true },
     }).setOrigin(0.5).setDepth(10)
 
-    // Rank badge
-    this._rankText = this.add.text(width / 2, height * 0.16, '', {
-      fontSize: '28px', fontFamily: '"Arial Black", Arial', color: '#f1c40f',
+    this._rankText = this.add.text(width / 2, height * 0.14, '', {
+      fontSize: '30px', fontFamily: '"Arial Black", Arial', color: '#f1c40f',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(10)
 
-    // Countdown overlay (hidden until needed)
-    this._countdownOverlay = this.add.graphics().setDepth(20)
-    this._countdownText = this.add.text(width / 2, height / 2, '', {
-      fontSize: '140px', fontFamily: '"Arial Black", Arial',
+    // Countdown burst (hidden until needed)
+    this._countdownText = this.add.text(width / 2, height * 0.45, '', {
+      fontSize: '150px', fontFamily: '"Arial Black", Arial',
       color: '#f1c40f', stroke: '#000', strokeThickness: 8,
     }).setOrigin(0.5).setDepth(21).setAlpha(0)
   }
 
-  // ── Tap zone — lower half of screen ────────────────────────────────────────
-  _buildTapZone(width, height) {
-    const zoneTop = height * 0.62
-    const zoneH = height - zoneTop
+  // ── Two-finger run zones ─────────────────────────────────────────────────────
+  _buildRunZones(width, height) {
+    const pad     = 10
+    const top     = height * 0.58
+    const zoneH   = height * 0.36    // leaves room for progress bar
+    const halfW   = (width - pad * 3) / 2
 
-    // Background of tap zone
-    this._tapBg = this.add.graphics()
-    this._tapBg.fillStyle(0x000000, 0.3)
-    this._tapBg.fillRoundedRect(16, zoneTop, width - 32, zoneH - 16, 20)
+    // Store for reuse in drawing/input
+    this._zt    = top
+    this._zh    = zoneH
+    this._hw    = halfW
+    this._zpad  = pad
 
-    // Tap hint text
-    this._tapHint = this.add.text(width / 2, zoneTop + zoneH / 2, '👆  TAP HERE TO RUN!', {
-      fontSize: '28px', fontFamily: '"Arial Black", Arial',
-      color: '#ffffff', alpha: 0.5,
-      stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5).setAlpha(0.5)
+    // ── Left zone ──
+    this._leftBg   = this.add.graphics().setDepth(2)
+    this._rightBg  = this.add.graphics().setDepth(2)
+    this._drawZone(this._leftBg,  'left',  'idle')
+    this._drawZone(this._rightBg, 'right', 'idle')
 
-    // Waiting text (shown before race)
-    this._waitText = this.add.text(width / 2, zoneTop + zoneH / 2, '⏳  Waiting for race to start...', {
-      fontSize: '20px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.5)',
-    }).setOrigin(0.5)
+    const lCx = pad + halfW / 2
+    const rCx = pad * 2 + halfW + halfW / 2
+    const midY = top + zoneH * 0.38
 
-    // Ripple container
-    this._rippleContainer = this.add.container(0, 0).setDepth(5)
+    // Foot emojis — left foot mirrored, right normal
+    this._leftFoot = this.add.text(lCx, midY, '🦶', {
+      fontSize: '68px',
+    }).setOrigin(0.5).setFlipX(true).setDepth(3)
+
+    this._rightFoot = this.add.text(rCx, midY, '🦶', {
+      fontSize: '68px',
+    }).setOrigin(0.5).setDepth(3)
+
+    // Labels
+    this._leftLabel = this.add.text(lCx, top + zoneH * 0.74, 'LEFT', {
+      fontSize: '22px', fontFamily: '"Arial Black", Arial',
+      color: '#7fb3d3', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(3)
+
+    this._rightLabel = this.add.text(rCx, top + zoneH * 0.74, 'RIGHT', {
+      fontSize: '22px', fontFamily: '"Arial Black", Arial',
+      color: '#bb8fce', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(3)
+
+    // Centre divider
+    const div = this.add.graphics().setDepth(3)
+    div.lineStyle(2, 0xffffff, 0.12)
+    div.beginPath()
+    div.moveTo(width / 2, top + 12)
+    div.lineTo(width / 2, top + zoneH - 12)
+    div.strokePath()
+
+    // "NEXT →" arrow that jumps above the expected zone
+    this._nextArrow = this.add.text(lCx, top - 28, '▼ NEXT', {
+      fontSize: '14px', fontFamily: '"Arial Black", Arial',
+      color: '#f1c40f', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5).setAlpha(0).setDepth(4)
+
+    // "SAME SIDE!" warning (flashes briefly on wrong tap)
+    this._wrongText = this.add.text(width / 2, top + zoneH / 2, '❌  SAME SIDE!', {
+      fontSize: '26px', fontFamily: '"Arial Black", Arial',
+      color: '#e74c3c', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setAlpha(0).setDepth(10)
+
+    // Waiting overlay text
+    this._waitText = this.add.text(width / 2, top + zoneH / 2, '⏳  Waiting for race...', {
+      fontSize: '18px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.45)',
+    }).setOrigin(0.5).setDepth(3)
+
+    this._zonesVisible = true
   }
 
-  // ── Mini progress bar (bottom strip) ───────────────────────────────────────
+  // Draw a zone background + border with three states: 'idle' | 'next' | 'wrong'
+  _drawZone(g, side, state) {
+    const { _zt: zt, _zh: zh, _hw: hw, _zpad: pad } = this
+    const x = side === 'left' ? pad : pad * 2 + hw
+    const baseColor = side === 'left' ? LEFT_COLOR : RIGHT_COLOR
+
+    let bgAlpha, borderAlpha, borderColor
+    if (state === 'next') {
+      bgAlpha = 0.38; borderAlpha = 1.0; borderColor = baseColor
+    } else if (state === 'wrong') {
+      bgAlpha = 0.45; borderAlpha = 1.0; borderColor = 0xe74c3c
+    } else {
+      bgAlpha = 0.08; borderAlpha = 0.25; borderColor = baseColor
+    }
+
+    g.clear()
+    g.fillStyle(state === 'wrong' ? 0xe74c3c : baseColor, bgAlpha)
+    g.fillRoundedRect(x, zt, hw, zh, 18)
+    g.lineStyle(3, borderColor, borderAlpha)
+    g.strokeRoundedRect(x, zt, hw, zh, 18)
+  }
+
+  // ── Progress bar (thin strip at very bottom) ────────────────────────────────
   _buildProgressBar(width, height) {
-    const barY = height - 20
-    const barH = 14
-    const pad = 20
+    const barY = height - 16
+    const barH = 12
+    const pad  = 16
     const barW = width - pad * 2
 
-    // Track
     const track = this.add.graphics()
-    track.fillStyle(0xffffff, 0.1)
-    track.fillRoundedRect(pad, barY - barH / 2, barW, barH, 7)
+    track.fillStyle(0xffffff, 0.08)
+    track.fillRoundedRect(pad, barY - barH / 2, barW, barH, 6)
 
-    // My fill (dynamic)
-    this._myFill = this.add.graphics()
-    this._myFill.setDepth(5)
+    this._myFill = this.add.graphics().setDepth(5)
+    this._myDot  = this.add.circle(pad, barY, 9, 0xffffff).setDepth(6)
 
-    // My dot on bar
-    this._myDot = this.add.circle(pad, barY, 10, 0xffffff)
-    this._myDot.setDepth(6)
-
-    // Other player dots
-    this._otherDots = []
-
-    this._progressY = barY
+    this._progressY   = barY
     this._progressPad = pad
-    this._progressW = barW
-    this._progressH = barH
+    this._progressW   = barW
+    this._progressH   = barH
   }
 
-  // ── Handle server update ────────────────────────────────────────────────────
+  // ── Incoming server update ───────────────────────────────────────────────────
   _onUpdate(data) {
     const { players = [], gameState, countdown } = data
-    this._gameStatus = gameState
+    this._gameStatus  = gameState
     this._lastPlayers = players
 
     const me = players.find(p => p.id === this._myId)
 
-    this._updateStatusText(gameState, countdown, players, me)
+    // Reset stride tracking when a fresh race begins
+    if (gameState === 'racing' && this._prevState !== 'racing') {
+      this._lastSide = null
+    }
+    this._prevState = gameState
+
+    this._updateStatusText(gameState, countdown, players)
     this._updateCharacterState(gameState, me)
+    this._updateZoneState(gameState)
     this._updateProgressBar(players, me)
-    this._updateTapZoneVisibility(gameState)
+    this._updateRankBadge(gameState, players)
 
-    // Rank label
-    if (me && (gameState === 'racing' || gameState === 'finished')) {
-      const sorted = [...players].sort((a, b) => b.position - a.position)
-      const rank = sorted.findIndex(p => p.id === this._myId)
-      if (rank >= 0) {
-        this._rankText.setText(RANK_LABELS[rank] || `${rank + 1}th`)
-        this._rankText.setColor(RANK_COLORS[rank] || '#ffffff')
-      }
-    } else {
-      this._rankText.setText('')
-    }
-
-    if (gameState === 'finished') {
-      this._showFinish(players, me)
-    }
+    if (gameState === 'finished') this._showFinish(players, me)
   }
 
-  _updateStatusText(state, countdown, players, me) {
-    const { width } = this.scale
+  _updateStatusText(state, countdown, players) {
     let msg = ''
     if (state === 'waiting') {
-      const readyCount = players.filter(p => p.ready).length
-      msg = players.length <= 1
-        ? '⏳ Waiting for players...'
-        : `${readyCount}/${players.length} ready`
+      const ready = players.filter(p => p.ready).length
+      msg = players.length <= 1 ? '⏳ Waiting for players...' : `${ready}/${players.length} ready`
     } else if (state === 'countdown') {
       msg = 'Get ready!'
       this._showCountdown(countdown)
     } else if (state === 'racing') {
-      msg = '🏃 Race in progress!'
-    } else if (state === 'finished') {
-      msg = ''
+      msg = '🏃 Alternate L + R fingers!'
     }
     this._statusText.setText(msg)
   }
 
   _showCountdown(n) {
     if (!n) return
-    this._countdownText.setText(String(n))
-    this._countdownText.setAlpha(1).setScale(0.5)
+    this._countdownText.setText(String(n)).setAlpha(1).setScale(0.4)
     this.tweens.killTweensOf(this._countdownText)
     this.tweens.add({
       targets: this._countdownText,
-      scaleX: 1.4, scaleY: 1.4, alpha: 0,
-      duration: 800, ease: 'Cubic.easeOut',
+      scaleX: 1.6, scaleY: 1.6, alpha: 0,
+      duration: 850, ease: 'Cubic.easeOut',
     })
-    this.cameras.main.shake(200, 0.008)
+    this.cameras.main.shake(180, 0.009)
   }
 
   _updateCharacterState(state, me) {
@@ -232,171 +272,275 @@ export default class PlayerScene extends Phaser.Scene {
       this._char.playIdle()
     } else if (state === 'finished') {
       const winner = this._lastPlayers?.find(p => p.position >= FINISH_LINE)
-      if (winner?.id === this._myId) {
-        this._char.playVictory()
-      } else {
-        this._char.stopRunning()
-      }
+      winner?.id === this._myId ? this._char.playVictory() : this._char.stopRunning()
     }
-
-    // Update wins badge
     if (me?.wins > 0) this._char.updateWins(me.wins)
   }
 
-  _updateProgressBar(players, me) {
-    const { width } = this.scale
-    const pad = this._progressPad
-    const barW = this._progressW
-    const barY = this._progressY
-    const barH = this._progressH
+  _updateZoneState(state) {
+    const racing  = state === 'racing'
+    const waiting = !racing && state !== 'finished'
 
-    // My fill
+    this._waitText.setVisible(waiting)
+    this._leftFoot.setVisible(!waiting)
+    this._rightFoot.setVisible(!waiting)
+    this._leftLabel.setVisible(!waiting)
+    this._rightLabel.setVisible(!waiting)
+
+    if (!racing) {
+      // Reset zones back to idle when not racing
+      this._drawZone(this._leftBg,  'left',  'idle')
+      this._drawZone(this._rightBg, 'right', 'idle')
+      this._nextArrow.setAlpha(0)
+      this.tweens.killTweensOf(this._nextArrow)
+
+      if (!waiting) {
+        // Hide zones completely on finish screen
+        this._leftBg.setVisible(false)
+        this._rightBg.setVisible(false)
+      } else {
+        this._leftBg.setVisible(true)
+        this._rightBg.setVisible(true)
+      }
+    } else {
+      this._leftBg.setVisible(true)
+      this._rightBg.setVisible(true)
+
+      // Show alternating hint for the first 2.5 seconds of the race
+      if (this._lastSide === null && !this._hintTimer) {
+        this._showRaceStartHint()
+      }
+    }
+  }
+
+  _showRaceStartHint() {
+    const { width } = this.scale
+    const hint = this.add.text(width / 2, this._zt + this._zh / 2,
+      '👈 Alternate fingers! 👉', {
+      fontSize: '20px', fontFamily: '"Arial Black", Arial',
+      color: '#f1c40f', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(8)
+
+    this._hintTimer = this.time.delayedCall(2200, () => {
+      this.tweens.add({ targets: hint, alpha: 0, duration: 400, onComplete: () => hint.destroy() })
+      this._hintTimer = null
+    })
+  }
+
+  _updateRankBadge(state, players) {
+    if (state === 'racing' || state === 'finished') {
+      const sorted = [...players].sort((a, b) => b.position - a.position)
+      const rank   = sorted.findIndex(p => p.id === this._myId)
+      if (rank >= 0) {
+        this._rankText.setText(RANK_LABELS[Math.min(rank, 3)])
+        this._rankText.setColor(RANK_COLORS[Math.min(rank, 3)])
+      }
+    } else {
+      this._rankText.setText('')
+    }
+  }
+
+  _updateProgressBar(players, me) {
+    const { _progressPad: pad, _progressW: barW, _progressY: barY, _progressH: barH } = this
+
     this._myFill.clear()
     if (me) {
-      const pct = Math.min(me.position / FINISH_LINE, 1)
-      const fillW = pct * barW
-      if (fillW > 0) {
-        const color = Phaser.Display.Color.HexStringToColor(me.color.replace('#', '')).color
+      const pct   = Math.min(me.position / FINISH_LINE, 1)
+      const color = Phaser.Display.Color.HexStringToColor(me.color.replace('#', '')).color
+      if (pct > 0) {
         this._myFill.fillStyle(color, 0.9)
-        this._myFill.fillRoundedRect(pad, barY - barH / 2, fillW, barH, 7)
+        this._myFill.fillRoundedRect(pad, barY - barH / 2, pct * barW, barH, 6)
       }
-      // My dot
       this._myDot.setPosition(pad + pct * barW, barY)
     }
 
-    // Other player dots — remove old ones and redraw
     this._otherDots.forEach(d => d.destroy())
     this._otherDots = []
     players.forEach(p => {
       if (p.id === this._myId) return
-      const pct = Math.min(p.position / FINISH_LINE, 1)
+      const pct   = Math.min(p.position / FINISH_LINE, 1)
       const color = Phaser.Display.Color.HexStringToColor(p.color.replace('#', '')).color
-      const dot = this.add.circle(pad + pct * barW, barY, 6, color).setDepth(6)
-      this._otherDots.push(dot)
+      this._otherDots.push(this.add.circle(pad + pct * barW, barY, 5, color).setDepth(6))
     })
   }
 
-  _updateTapZoneVisibility(state) {
-    const racing = state === 'racing'
-    this._tapHint.setVisible(racing)
-    this._waitText.setVisible(!racing && state !== 'finished')
+  // ── Two-finger step logic ─────────────────────────────────────────────────────
+  _handleStep(x, y) {
+    const { width } = this.scale
+    const side         = x < width / 2 ? 'left' : 'right'
+    const isFirst      = this._lastSide === null
+    const isAlternating = this._lastSide !== side
 
-    // Pulse the tap hint
-    if (racing && !this._hintPulsing) {
-      this._hintPulsing = true
-      this.tweens.add({
-        targets: this._tapHint, alpha: 0.9, duration: 700,
-        yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-      })
-    } else if (!racing) {
-      this._hintPulsing = false
-      this.tweens.killTweensOf(this._tapHint)
+    if (isFirst || isAlternating) {
+      // ✅ Valid step
+      this._lastSide = side
+      getSocket()?.emit('move')
+      this._flashValid(side, x, y)
+      this._highlightNext(side === 'left' ? 'right' : 'left')
+    } else {
+      // ❌ Same side again
+      this._flashWrong(side)
     }
   }
 
-  // ── Tap → move ──────────────────────────────────────────────────────────────
-  _sendMove(tapX, tapY) {
-    const socket = getSocket()
-    if (!socket) return
-    socket.emit('move')
+  // Flash the tapped zone green-ish + bounce the foot icon
+  _flashValid(side, x, y) {
+    const bg   = side === 'left' ? this._leftBg   : this._rightBg
+    const icon = side === 'left' ? this._leftFoot : this._rightFoot
 
-    // Ripple effect at tap position
-    const ring = this.add.circle(tapX, tapY, 10, 0xffffff, 0.7)
-    ring.setDepth(10)
+    this._drawZone(bg, side, 'next')
+
+    // Foot stamp animation
+    this.tweens.killTweensOf(icon)
     this.tweens.add({
-      targets: ring, scaleX: 5, scaleY: 5, alpha: 0,
-      duration: 500, ease: 'Cubic.easeOut',
-      onComplete: () => ring.destroy(),
+      targets: icon,
+      scaleX: 1.5, scaleY: 1.5,
+      duration: 75, yoyo: true, ease: 'Quad.easeOut',
+      onComplete: () => {
+        // Zone dims after stamp
+        this._drawZone(bg, side, 'idle')
+      },
     })
 
-    // Flash the tap zone
-    this._tapBg.clear()
-    this._tapBg.fillStyle(0xffffff, 0.12)
-    const zoneTop = this.scale.height * 0.62
-    const zoneH = this.scale.height - zoneTop
-    this._tapBg.fillRoundedRect(16, zoneTop, this.scale.width - 32, zoneH - 16, 20)
-    this.time.delayedCall(120, () => {
-      this._tapBg.clear()
-      this._tapBg.fillStyle(0x000000, 0.3)
-      this._tapBg.fillRoundedRect(16, zoneTop, this.scale.width - 32, zoneH - 16, 20)
+    // Ripple at touch point
+    const ripple = this.add.circle(x, y, 12,
+      side === 'left' ? LEFT_COLOR : RIGHT_COLOR, 0.7).setDepth(9)
+    this.tweens.add({
+      targets: ripple, scaleX: 5, scaleY: 5, alpha: 0,
+      duration: 450, ease: 'Cubic.easeOut',
+      onComplete: () => ripple.destroy(),
     })
   }
 
-  // ── Win / lose screen ───────────────────────────────────────────────────────
+  // Highlight the zone the player should tap next
+  _highlightNext(nextSide) {
+    const { width }  = this.scale
+    const lCx        = this._zpad + this._hw / 2
+    const rCx        = this._zpad * 2 + this._hw + this._hw / 2
+    const arrowX     = nextSide === 'left' ? lCx : rCx
+    const nextBg     = nextSide === 'left' ? this._leftBg   : this._rightBg
+    const prevBg     = nextSide === 'left' ? this._rightBg  : this._leftBg
+    const prevSide   = nextSide === 'left' ? 'right' : 'left'
+
+    // Brighten next zone
+    this._drawZone(nextBg, nextSide, 'next')
+    // Dim previous zone
+    this._drawZone(prevBg, prevSide, 'idle')
+
+    // Bounce the "▼ NEXT" arrow above the next zone
+    this.tweens.killTweensOf(this._nextArrow)
+    this._nextArrow.setPosition(arrowX, this._zt - 32).setAlpha(1)
+    this.tweens.add({
+      targets: this._nextArrow,
+      y: this._zt - 18,
+      duration: 280, yoyo: true, repeat: 2, ease: 'Sine.easeInOut',
+      onComplete: () => {
+        this.tweens.add({ targets: this._nextArrow, alpha: 0.4, duration: 200 })
+      },
+    })
+  }
+
+  // Flash a zone red + camera shake + "SAME SIDE!" warning
+  _flashWrong(side) {
+    const bg = side === 'left' ? this._leftBg : this._rightBg
+
+    this._drawZone(bg, side, 'wrong')
+    this.cameras.main.shake(90, 0.006)
+
+    // "SAME SIDE!" text burst
+    this.tweens.killTweensOf(this._wrongText)
+    this._wrongText.setAlpha(1).setScale(0.8)
+    this.tweens.add({
+      targets: this._wrongText,
+      scaleX: 1.1, scaleY: 1.1,
+      duration: 120, yoyo: true, ease: 'Quad.easeOut',
+    })
+    this.tweens.add({
+      targets: this._wrongText, alpha: 0,
+      duration: 500, delay: 350,
+    })
+
+    // Restore zone colour
+    this.time.delayedCall(300, () => {
+      // Re-apply correct highlight state after flash
+      const nextSide  = this._lastSide  // the side that SHOULD be tapped
+      const otherSide = nextSide === 'left' ? 'right' : 'left'
+      if (this._lastSide) {
+        this._drawZone(bg, side, side === otherSide ? 'next' : 'idle')
+      } else {
+        this._drawZone(bg, side, 'idle')
+      }
+    })
+  }
+
+  // ── Win / Lose finish screen ─────────────────────────────────────────────────
   _showFinish(players, me) {
     if (this._finishShown) return
     this._finishShown = true
 
     const { width, height } = this.scale
     const winner = players.find(p => p.position >= FINISH_LINE)
-    const iWon = winner?.id === this._myId
+    const iWon   = winner?.id === this._myId
 
-    // Semi-transparent overlay
     const overlay = this.add.graphics().setDepth(30)
-    overlay.fillStyle(0x000000, 0.6)
+    overlay.fillStyle(0x000000, 0.65)
     overlay.fillRect(0, 0, width, height)
 
     if (iWon) {
-      // Confetti!
+      // Confetti cannon
       for (let i = 0; i < 6; i++) {
-        const key = `confetti_${i}`
         const emitter = this.add.particles(
-          Phaser.Math.Between(0, width), 0, key, {
-            speedY: { min: 150, max: 350 },
-            speedX: { min: -80, max: 80 },
-            gravityY: 200,
-            scale: { start: 1.2, end: 0.3 },
+          Phaser.Math.Between(0, width), 0, `confetti_${i}`, {
+            speedY: { min: 160, max: 380 },
+            speedX: { min: -90, max: 90 },
+            gravityY: 220, rotate: { min: 0, max: 360 },
+            scale: { start: 1.3, end: 0.2 },
             alpha: { start: 1, end: 0 },
-            rotate: { min: 0, max: 360 },
-            lifespan: 2500,
-            quantity: 3,
+            lifespan: 2600, quantity: 4,
           }
         ).setDepth(31)
-        this.time.delayedCall(3000, () => emitter.stop())
+        this.time.delayedCall(3200, () => emitter.stop())
       }
 
-      const winText = this.add.text(width / 2, height * 0.35, '🏆 YOU WIN! 🏆', {
+      const winText = this.add.text(width / 2, height * 0.32, '🏆 YOU WIN! 🏆', {
         fontSize: '52px', fontFamily: '"Arial Black", Arial',
         color: '#f1c40f', stroke: '#000', strokeThickness: 6,
       }).setOrigin(0.5).setDepth(32).setScale(0)
-      this.tweens.add({
-        targets: winText, scaleX: 1, scaleY: 1, duration: 600, ease: 'Back.easeOut',
-      })
+      this.tweens.add({ targets: winText, scaleX: 1, scaleY: 1, duration: 600, ease: 'Back.easeOut' })
+
     } else {
       const pos = [...players].sort((a, b) => b.position - a.position)
         .findIndex(p => p.id === this._myId) + 1
-      this.add.text(width / 2, height * 0.35, `You finished ${pos}${pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}`, {
-        fontSize: '36px', fontFamily: '"Arial Black", Arial',
-        color: '#ffffff', stroke: '#000', strokeThickness: 4,
+      const suffix = pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'
+      this.add.text(width / 2, height * 0.32, `You finished ${pos}${suffix}`, {
+        fontSize: '38px', fontFamily: '"Arial Black", Arial',
+        color: '#ffffff', stroke: '#000', strokeThickness: 5,
       }).setOrigin(0.5).setDepth(32)
 
       if (winner) {
-        this.add.text(width / 2, height * 0.45, `${winner.name} wins! 🎉`, {
-          fontSize: '22px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.8)',
+        this.add.text(width / 2, height * 0.43, `${winner.name} wins! 🎉`, {
+          fontSize: '22px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.75)',
         }).setOrigin(0.5).setDepth(32)
       }
     }
 
-    // Play Again button
-    const btn = this.add.text(width / 2, height * 0.65, '▶  Play Again', {
-      fontSize: '24px', fontFamily: '"Arial Black", Arial',
-      color: '#1a1a2e',
-      backgroundColor: '#f1c40f',
-      padding: { x: 28, y: 14 },
+    // Play Again
+    const playBtn = this.add.text(width / 2, height * 0.62, '▶  Play Again', {
+      fontSize: '26px', fontFamily: '"Arial Black", Arial',
+      color: '#1a1a2e', backgroundColor: '#f1c40f', padding: { x: 32, y: 16 },
     }).setOrigin(0.5).setDepth(32).setInteractive({ useHandCursor: true })
-
-    btn.on('pointerover', () => btn.setScale(1.05))
-    btn.on('pointerout', () => btn.setScale(1.0))
-    btn.on('pointerdown', () => {
+    playBtn.on('pointerover', () => playBtn.setScale(1.05))
+    playBtn.on('pointerout',  () => playBtn.setScale(1.0))
+    playBtn.on('pointerdown', () => {
       getSocket()?.emit('requestRestart')
       this._finishShown = false
     })
 
-    // Leave button
-    const leaveBtn = this.add.text(width / 2, height * 0.77, 'Leave Game', {
-      fontSize: '16px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.5)',
+    // Leave
+    this.add.text(width / 2, height * 0.75, 'Leave Game', {
+      fontSize: '16px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.45)',
     }).setOrigin(0.5).setDepth(32).setInteractive({ useHandCursor: true })
-    leaveBtn.on('pointerdown', () => { disconnect(); window.location.reload() })
+      .on('pointerdown', () => { disconnect(); window.location.reload() })
   }
 
   update() {}
