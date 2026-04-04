@@ -35,7 +35,9 @@ export default class PlayerScene extends Phaser.Scene {
     this._lastSide   = null   // 'left' | 'right' | null (null = first step, any side ok)
     this._prevState  = null
     this._finishShown = false
-    this._otherDots  = []
+    this._trackDots  = {}
+    this._trackLabels = {}
+    this._trackGlows = {}
 
     // Enable multi-touch so both fingers are tracked simultaneously
     this.input.addPointer(3)
@@ -44,7 +46,7 @@ export default class PlayerScene extends Phaser.Scene {
     this._buildCharacter(width, height)
     this._buildStatusArea(width, height)
     this._buildRunZones(width, height)
-    this._buildProgressBar(width, height)
+    this._buildMiniTrack(width, height)
 
     socket.off('updateGame')
     socket.on('updateGame', (data) => this._onUpdate(data))
@@ -105,7 +107,7 @@ export default class PlayerScene extends Phaser.Scene {
   _buildRunZones(width, height) {
     const pad     = 10
     const top     = height * 0.58
-    const zoneH   = height * 0.36    // leaves room for progress bar
+    const zoneH   = height * 0.28    // leaves room for mini race track
     const halfW   = (width - pad * 3) / 2
 
     // Store for reuse in drawing/input
@@ -194,24 +196,61 @@ export default class PlayerScene extends Phaser.Scene {
     g.strokeRoundedRect(x, zt, hw, zh, 18)
   }
 
-  // ── Progress bar (thin strip at very bottom) ────────────────────────────────
-  _buildProgressBar(width, height) {
-    const barY = height - 16
-    const barH = 12
-    const pad  = 16
-    const barW = width - pad * 2
+  // ── Mini race track (bottom strip) ─────────────────────────────────────────
+  _buildMiniTrack(width, height) {
+    const pad  = 14
+    const trkY = height * 0.89
+    const trkH = height * 0.10
+    const trkW = width - pad * 2
 
-    const track = this.add.graphics()
-    track.fillStyle(0xffffff, 0.08)
-    track.fillRoundedRect(pad, barY - barH / 2, barW, barH, 6)
+    this._trkY   = trkY
+    this._trkH   = trkH
+    this._trkW   = trkW
+    this._trkPad = pad
 
-    this._myFill = this.add.graphics().setDepth(5)
-    this._myDot  = this.add.circle(pad, barY, 9, 0xffffff).setDepth(6)
+    // Track backdrop — dark grass-like background
+    const bg = this.add.graphics().setDepth(5)
+    bg.fillStyle(0x0a1f0a, 0.85)
+    bg.fillRoundedRect(pad, trkY, trkW, trkH, 10)
 
-    this._progressY   = barY
-    this._progressPad = pad
-    this._progressW   = barW
-    this._progressH   = barH
+    // Dashed center lane line
+    const lineY   = trkY + trkH / 2
+    const dashG   = this.add.graphics().setDepth(5)
+    dashG.lineStyle(1, 0xffffff, 0.15)
+    const dashLen = 12, gapLen = 8
+    for (let x = pad + 38; x < pad + trkW - 38; x += dashLen + gapLen) {
+      dashG.beginPath()
+      dashG.moveTo(x, lineY)
+      dashG.lineTo(Math.min(x + dashLen, pad + trkW - 38), lineY)
+      dashG.strokePath()
+    }
+
+    // Start flag
+    this.add.text(pad + 5, trkY + trkH / 2, '🚩', {
+      fontSize: '15px',
+    }).setOrigin(0, 0.5).setDepth(6)
+
+    // Finish line + flag
+    const finX = pad + trkW - 5
+    const finG  = this.add.graphics().setDepth(6)
+    finG.lineStyle(3, 0xf1c40f, 1.0)
+    finG.beginPath()
+    finG.moveTo(finX, trkY + 5)
+    finG.lineTo(finX, trkY + trkH - 5)
+    finG.strokePath()
+    this.add.text(finX - 2, trkY + 3, '🏁', {
+      fontSize: '15px',
+    }).setOrigin(1, 0).setDepth(6)
+
+    // Section label
+    this.add.text(pad + trkW / 2, trkY - 5, 'RACE', {
+      fontSize: '9px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.3)',
+    }).setOrigin(0.5, 1).setDepth(5)
+
+    // Dynamic elements created on first data update
+    this._trackDots  = {}
+    this._trackLabels = {}
+    this._trackGlows = {}
   }
 
   // ── Incoming server update ───────────────────────────────────────────────────
@@ -231,7 +270,7 @@ export default class PlayerScene extends Phaser.Scene {
     this._updateStatusText(gameState, countdown, players)
     this._updateCharacterState(gameState, me)
     this._updateZoneState(gameState)
-    this._updateProgressBar(players, me)
+    this._updateMiniTrack(players, me)
     this._updateRankBadge(gameState, players)
 
     if (gameState === 'finished') this._showFinish(players, me)
@@ -340,27 +379,59 @@ export default class PlayerScene extends Phaser.Scene {
     }
   }
 
-  _updateProgressBar(players, me) {
-    const { _progressPad: pad, _progressW: barW, _progressY: barY, _progressH: barH } = this
+  _updateMiniTrack(players, me) {
+    const { _trkPad: pad, _trkW: trkW, _trkY: trkY, _trkH: trkH } = this
 
-    this._myFill.clear()
-    if (me) {
-      const pct   = Math.min(me.position / FINISH_LINE, 1)
-      const color = Phaser.Display.Color.HexStringToColor(me.color.replace('#', '')).color
-      if (pct > 0) {
-        this._myFill.fillStyle(color, 0.9)
-        this._myFill.fillRoundedRect(pad, barY - barH / 2, pct * barW, barH, 6)
+    // Race zone inside the track — leave margins for the flags
+    const leftEdge  = pad + 36
+    const rightEdge = pad + trkW - 30
+    const range     = rightEdge - leftEdge
+    const dotY      = trkY + trkH / 2
+
+    const activeIds = new Set(players.map(p => p.id))
+
+    // Remove dots for players who left
+    for (const id of Object.keys(this._trackDots)) {
+      if (!activeIds.has(id)) {
+        this._trackDots[id].destroy()
+        this._trackLabels[id]?.destroy()
+        this._trackGlows[id]?.destroy()
+        delete this._trackDots[id]
+        delete this._trackLabels[id]
+        delete this._trackGlows[id]
       }
-      this._myDot.setPosition(pad + pct * barW, barY)
     }
 
-    this._otherDots.forEach(d => d.destroy())
-    this._otherDots = []
     players.forEach(p => {
-      if (p.id === this._myId) return
+      const isMe  = p.id === this._myId
       const pct   = Math.min(p.position / FINISH_LINE, 1)
+      const x     = leftEdge + pct * range
+      const r     = isMe ? 9 : 6
       const color = Phaser.Display.Color.HexStringToColor(p.color.replace('#', '')).color
-      this._otherDots.push(this.add.circle(pad + pct * barW, barY, 5, color).setDepth(6))
+      const shortName = p.name.length > 5 ? p.name.slice(0, 5) + '.' : p.name
+
+      if (!this._trackDots[p.id]) {
+        // Create dot + label for first time
+        if (isMe) {
+          this._trackGlows[p.id] = this.add.circle(x, dotY, r + 5, color, 0.25).setDepth(6)
+        }
+        this._trackDots[p.id] = this.add.circle(x, dotY, r, color).setDepth(7)
+
+        const labelText = isMe ? 'YOU' : shortName
+        this._trackLabels[p.id] = this.add.text(x, dotY + r + 3, labelText, {
+          fontSize: isMe ? '11px' : '9px',
+          fontFamily: isMe ? '"Arial Black", Arial' : 'Arial',
+          color: isMe ? '#f1c40f' : 'rgba(255,255,255,0.55)',
+        }).setOrigin(0.5, 0).setDepth(7)
+
+      } else {
+        // Tween existing dot to new position smoothly
+        this.tweens.add({ targets: this._trackDots[p.id],   x, duration: 120, ease: 'Linear' })
+        this.tweens.add({ targets: this._trackLabels[p.id], x, duration: 120, ease: 'Linear' })
+        if (this._trackGlows[p.id]) {
+          this.tweens.add({ targets: this._trackGlows[p.id], x, duration: 120, ease: 'Linear' })
+        }
+      }
     })
   }
 
