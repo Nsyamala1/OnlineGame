@@ -102,11 +102,38 @@ export default class WaitingScene extends Phaser.Scene {
     // Hide ready button and show spectator badge for display clients
     const isDisplay = this.registry.get('clientRole') === 'display'
     if (isDisplay) {
-      this.add.text(cx, height - 60, '📺  DISPLAY MODE  —  Spectating', {
+      this.add.text(cx, height - 100, '📺  DISPLAY MODE  —  Spectating', {
         fontSize: '16px', fontFamily: '"Arial Black", Arial',
         color: '#3498db', backgroundColor: 'rgba(52,152,219,0.15)',
         padding: { x: 16, y: 10 },
       }).setOrigin(0.5)
+
+      // Game selector — only the display screen picks the game
+      const selectorY = height - 52
+      this.add.text(cx - 130, selectorY, 'Game:', {
+        fontSize: '14px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.5)',
+      }).setOrigin(0, 0.5)
+
+      const games = [
+        { key: 'sprint',  label: '🏃 Sprint' },
+        { key: 'cycling', label: '🚴 Cycling' },
+      ]
+      this._gameTypeBtns = {}
+      games.forEach((g, i) => {
+        const btn = this.add.text(cx - 60 + i * 130, selectorY, g.label, {
+          fontSize: '15px', fontFamily: '"Arial Black", Arial',
+          color: '#1a1a2e', backgroundColor: '#555555',
+          padding: { x: 14, y: 8 },
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+
+        btn.on('pointerdown', () => {
+          const socket = getSocket()
+          if (socket) socket.emit('setGameType', g.key)
+        })
+        this._gameTypeBtns[g.key] = btn
+      })
+      // Highlight initial selection
+      this._highlightGameBtn(this.registry.get('gameType') || 'sprint')
     }
 
     // Ready button
@@ -194,18 +221,25 @@ export default class WaitingScene extends Phaser.Scene {
   }
 
   _onUpdateGame(data) {
-    const { players, gameState, countdown } = data
+    const { players, gameState, gameType, countdown } = data
     const socket = getSocket()
     const myId = socket ? socket.id : null
+
+    // Keep gameType in registry so buttons stay highlighted correctly
+    if (gameType) this.registry.set('gameType', gameType)
+
+    // Update game type button highlight for display clients
+    if (gameType && this._gameTypeBtns) this._highlightGameBtn(gameType)
 
     if (gameState === 'racing') {
       if (socket) socket.off('updateGame')
       this._destroyAllCharacters()
       const role = this.registry.get('clientRole')
       if (role === 'display') {
-        this.scene.start('Race', { players, gameState })
+        this.scene.start('Race', { players, gameState, gameType })
       } else {
-        this.scene.start('Player', { gameData: data })
+        const sceneKey = gameType === 'cycling' ? 'CyclingPlayer' : 'Player'
+        this.scene.start(sceneKey, { gameData: data })
       }
       return
     }
@@ -316,6 +350,18 @@ export default class WaitingScene extends Phaser.Scene {
       alpha: 0,
       duration: 800,
       ease: 'Quad.easeIn',
+    })
+  }
+
+  _highlightGameBtn(activeKey) {
+    if (!this._gameTypeBtns) return
+    const colors = { sprint: '#e67e22', cycling: '#2ecc71' }
+    Object.entries(this._gameTypeBtns).forEach(([key, btn]) => {
+      const isActive = key === activeKey
+      btn.setStyle({
+        backgroundColor: isActive ? (colors[key] || '#f1c40f') : '#555555',
+        color: isActive ? '#1a1a2e' : 'rgba(255,255,255,0.5)',
+      })
     })
   }
 

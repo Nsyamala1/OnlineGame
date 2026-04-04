@@ -36,7 +36,8 @@ const gameState = {
   status: 'waiting',
   countdownTimer: null,
   aiPlayers: [],
-  aiInterval: null
+  aiInterval: null,
+  gameType: 'sprint',   // 'sprint' | 'cycling'
 };
 
 const GAME_CONFIG = {
@@ -73,6 +74,7 @@ function broadcastUpdate(extra = {}) {
   io.emit('updateGame', {
     players: allPlayers(),
     gameState: gameState.status,
+    gameType: gameState.gameType,
     ...extra
   });
 }
@@ -188,6 +190,15 @@ async function startServer() {
         return; // silently drop; don't call next()
       }
       next();
+    });
+
+    // ── Display screen: game type selector ─────────────────────────────────
+    socket.on('setGameType', (type) => {
+      const allowed = ['sprint', 'cycling'];
+      if (!allowed.includes(type)) return;
+      if (gameState.status !== 'waiting') return;  // can't change mid-race
+      gameState.gameType = type;
+      broadcastUpdate();
     });
 
     // ── Display screen (TV/laptop) ──────────────────────────────────────────
