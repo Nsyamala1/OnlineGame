@@ -140,8 +140,8 @@ async function setupServer() {
   return { server, io };
 }
 
-// Serve static files from the "public" folder
-app.use(express.static(path.join(__dirname, 'public')));
+// Static file serving is handled by the React dev server (port 3000).
+// This Express server only handles the Socket.io game API (port 3001).
 
 
 
