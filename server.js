@@ -194,7 +194,7 @@ async function startServer() {
 
     // ── Display screen: game type selector ─────────────────────────────────
     socket.on('setGameType', (type) => {
-      const allowed = ['sprint', 'cycling'];
+      const allowed = ['sprint', 'cycling', 'swimming'];
       if (!allowed.includes(type)) return;
       if (gameState.status !== 'waiting') return;  // can't change mid-race
       gameState.gameType = type;

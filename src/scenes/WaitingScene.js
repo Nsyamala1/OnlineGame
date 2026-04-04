@@ -115,12 +115,13 @@ export default class WaitingScene extends Phaser.Scene {
       }).setOrigin(0, 0.5)
 
       const games = [
-        { key: 'sprint',  label: '🏃 Sprint' },
-        { key: 'cycling', label: '🚴 Cycling' },
+        { key: 'sprint',   label: '🏃 Sprint' },
+        { key: 'cycling',  label: '🚴 Cycling' },
+        { key: 'swimming', label: '🏊 Swimming' },
       ]
       this._gameTypeBtns = {}
       games.forEach((g, i) => {
-        const btn = this.add.text(cx - 60 + i * 130, selectorY, g.label, {
+        const btn = this.add.text(cx - 130 + i * 130, selectorY, g.label, {
           fontSize: '15px', fontFamily: '"Arial Black", Arial',
           color: '#1a1a2e', backgroundColor: '#555555',
           padding: { x: 14, y: 8 },
@@ -238,7 +239,8 @@ export default class WaitingScene extends Phaser.Scene {
       if (role === 'display') {
         this.scene.start('Race', { players, gameState, gameType })
       } else {
-        const sceneKey = gameType === 'cycling' ? 'CyclingPlayer' : 'Player'
+        const sceneKey = gameType === 'cycling' ? 'CyclingPlayer'
+          : gameType === 'swimming' ? 'SwimmingPlayer' : 'Player'
         this.scene.start(sceneKey, { gameData: data })
       }
       return
@@ -355,7 +357,7 @@ export default class WaitingScene extends Phaser.Scene {
 
   _highlightGameBtn(activeKey) {
     if (!this._gameTypeBtns) return
-    const colors = { sprint: '#e67e22', cycling: '#2ecc71' }
+    const colors = { sprint: '#e67e22', cycling: '#2ecc71', swimming: '#3498db' }
     Object.entries(this._gameTypeBtns).forEach(([key, btn]) => {
       const isActive = key === activeKey
       btn.setStyle({
