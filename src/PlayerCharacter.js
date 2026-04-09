@@ -132,11 +132,20 @@ export default class PlayerCharacter {
     this._running = true
     this._stopBodyBob()
 
-    // Faster body bob
+    // Forward lean
+    this.scene.tweens.add({
+      targets: this.bodyContainer,
+      angle: 10,
+      duration: 200,
+      ease: 'Sine.easeOut',
+    })
+
+    // Faster body bob with squash at the bottom
     const bobT = this.scene.tweens.add({
       targets: this.bodyContainer,
-      y: { from: 0, to: -5 },
-      duration: 200,
+      y: { from: 0, to: -6 },
+      scaleY: { from: 1, to: 0.93 },
+      duration: 190,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
@@ -144,11 +153,11 @@ export default class PlayerCharacter {
     this.activeTweens.push(bobT)
     this._runBobTween = bobT
 
-    // Arms swing
+    // Arms swing — wider range for expressiveness
     const leftArmT = this.scene.tweens.add({
       targets: this.leftArm,
-      angle: { from: -45, to: 45 },
-      duration: 250,
+      angle: { from: -62, to: 62 },
+      duration: 220,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
@@ -157,19 +166,19 @@ export default class PlayerCharacter {
 
     const rightArmT = this.scene.tweens.add({
       targets: this.rightArm,
-      angle: { from: 45, to: -45 },
-      duration: 250,
+      angle: { from: 62, to: -62 },
+      duration: 220,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
     })
     this.activeTweens.push(rightArmT)
 
-    // Legs swing
+    // Legs swing — bigger stride
     const leftLegT = this.scene.tweens.add({
       targets: this.leftLeg,
-      angle: { from: 40, to: -40 },
-      duration: 250,
+      angle: { from: 55, to: -55 },
+      duration: 220,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
@@ -178,8 +187,8 @@ export default class PlayerCharacter {
 
     const rightLegT = this.scene.tweens.add({
       targets: this.rightLeg,
-      angle: { from: -40, to: 40 },
-      duration: 250,
+      angle: { from: -55, to: 55 },
+      duration: 220,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
@@ -206,6 +215,15 @@ export default class PlayerCharacter {
     this.leftLeg.angle = 0
     this.rightLeg.angle = 0
     this.bodyContainer.y = 0
+    this.bodyContainer.scaleY = 1
+
+    // Smoothly upright the lean
+    this.scene.tweens.add({
+      targets: this.bodyContainer,
+      angle: 0,
+      duration: 200,
+      ease: 'Sine.easeOut',
+    })
 
     if (this.dustEmitter) {
       this.dustEmitter.stop()
@@ -222,31 +240,77 @@ export default class PlayerCharacter {
 
     if (this.dustEmitter) this.dustEmitter.stop()
 
-    // Arms shoot up
+    // Reset lean from running
+    this.bodyContainer.angle = 0
+    this.bodyContainer.scaleY = 1
+
+    // Arms shoot up then wave alternately
     this.scene.tweens.add({
-      targets: [this.leftArm, this.rightArm],
-      angle: -160,
-      duration: 300,
+      targets: this.leftArm,
+      angle: -155,
+      duration: 280,
       ease: 'Back.easeOut',
+      onComplete: () => {
+        const waveL = this.scene.tweens.add({
+          targets: this.leftArm,
+          angle: { from: -155, to: -130 },
+          duration: 280,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+          delay: 0,
+        })
+        this.activeTweens.push(waveL)
+      },
     })
 
-    // Jump repeatedly
+    this.scene.tweens.add({
+      targets: this.rightArm,
+      angle: -155,
+      duration: 280,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        const waveR = this.scene.tweens.add({
+          targets: this.rightArm,
+          angle: { from: -130, to: -155 },
+          duration: 280,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+          delay: 0,
+        })
+        this.activeTweens.push(waveR)
+      },
+    })
+
+    // Jump repeatedly with squash on land
     const jumpT = this.scene.tweens.add({
       targets: this.posContainer,
-      y: this.posContainer.y - 40,
-      duration: 350,
+      y: this.posContainer.y - 45,
+      duration: 360,
       yoyo: true,
       repeat: -1,
       ease: 'Quad.easeOut',
     })
     this.activeTweens.push(jumpT)
 
-    // Spin head
+    // Body sway side to side
+    const swayT = this.scene.tweens.add({
+      targets: this.bodyContainer,
+      x: { from: -6, to: 6 },
+      duration: 360,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+    this.activeTweens.push(swayT)
+
+    // Head pulse bigger
     const headT = this.scene.tweens.add({
       targets: this.head,
-      scaleX: { from: 1, to: 1.3 },
-      scaleY: { from: 1, to: 1.3 },
-      duration: 400,
+      scaleX: { from: 1, to: 1.35 },
+      scaleY: { from: 1, to: 1.35 },
+      duration: 350,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
@@ -269,7 +333,7 @@ export default class PlayerCharacter {
       targets: this.posContainer,
       x: x,
       duration: 150,
-      ease: 'Linear',
+      ease: 'Quad.easeOut',
       onUpdate: () => {
         if (this.dustEmitter) {
           this.dustEmitter.setPosition(this.posContainer.x, this.posContainer.y)
@@ -324,6 +388,7 @@ export default class PlayerCharacter {
       this._runBobTween = null
     }
     this.bodyContainer.y = 0
+    this.bodyContainer.scaleY = 1
   }
 
   _clearActiveTweens() {
