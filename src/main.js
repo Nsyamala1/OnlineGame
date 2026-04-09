@@ -6,6 +6,8 @@ import RaceScene from './scenes/RaceScene.js'
 import PlayerScene from './scenes/PlayerScene.js'
 import CyclingPlayerScene from './scenes/CyclingPlayerScene.js'
 import SwimmingPlayerScene from './scenes/SwimmingPlayerScene.js'
+import TugOfWarScene from './scenes/TugOfWarScene.js'
+import TugOfWarPlayerScene from './scenes/TugOfWarPlayerScene.js'
 import FinishScene from './scenes/FinishScene.js'
 
 const config = {
@@ -19,7 +21,7 @@ const config = {
     width: window.innerWidth,
     height: window.innerHeight,
   },
-  scene: [BootScene, LandingScene, WaitingScene, RaceScene, PlayerScene, CyclingPlayerScene, SwimmingPlayerScene, FinishScene],
+  scene: [BootScene, LandingScene, WaitingScene, RaceScene, PlayerScene, CyclingPlayerScene, SwimmingPlayerScene, TugOfWarScene, TugOfWarPlayerScene, FinishScene],
 }
 
 new Phaser.Game(config)

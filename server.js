@@ -37,7 +37,13 @@ const gameState = {
   countdownTimer: null,
   aiPlayers: [],
   aiInterval: null,
-  gameType: 'sprint',   // 'sprint' | 'cycling'
+  gameType: 'sprint',   // 'sprint' | 'cycling' | 'swimming' | 'tugofwar'
+  ropePosition: 0,      // tugofwar: negative = Team A winning, positive = Team B winning
+};
+
+const TOW_CONFIG = {
+  WIN_THRESHOLD: 400,
+  PULL_AMOUNT: 28,
 };
 
 const GAME_CONFIG = {
@@ -75,6 +81,7 @@ function broadcastUpdate(extra = {}) {
     players: allPlayers(),
     gameState: gameState.status,
     gameType: gameState.gameType,
+    ropePosition: gameState.ropePosition,
     ...extra
   });
 }
@@ -85,15 +92,31 @@ function startAIMovement() {
   gameState.aiInterval = setInterval(() => {
     if (gameState.status !== 'racing') return;
 
-    gameState.aiPlayers.forEach(ai => {
-      if (ai.position < GAME_CONFIG.FINISH_LINE) {
-        ai.position = Math.min(ai.position + GAME_CONFIG.MOVE_AMOUNT, GAME_CONFIG.FINISH_LINE);
-        if (ai.position >= GAME_CONFIG.FINISH_LINE) {
-          ai.wins++;
-          gameState.status = 'finished';
-        }
+    if (gameState.gameType === 'tugofwar') {
+      if (gameState.aiPlayers.length === 0) return;
+      // One AI pulls per tick
+      const ai  = gameState.aiPlayers[Math.floor(Math.random() * gameState.aiPlayers.length)];
+      const dir = ai.team === 'A' ? -1 : 1;
+      gameState.ropePosition = Math.max(
+        -TOW_CONFIG.WIN_THRESHOLD,
+        Math.min(TOW_CONFIG.WIN_THRESHOLD, gameState.ropePosition + dir * TOW_CONFIG.PULL_AMOUNT)
+      );
+      if (Math.abs(gameState.ropePosition) >= TOW_CONFIG.WIN_THRESHOLD) {
+        const winTeam = gameState.ropePosition < 0 ? 'A' : 'B';
+        allPlayers().filter(p => p.team === winTeam).forEach(p => p.wins++);
+        gameState.status = 'finished';
       }
-    });
+    } else {
+      gameState.aiPlayers.forEach(ai => {
+        if (ai.position < GAME_CONFIG.FINISH_LINE) {
+          ai.position = Math.min(ai.position + GAME_CONFIG.MOVE_AMOUNT, GAME_CONFIG.FINISH_LINE);
+          if (ai.position >= GAME_CONFIG.FINISH_LINE) {
+            ai.wins++;
+            gameState.status = 'finished';
+          }
+        }
+      });
+    }
 
     broadcastUpdate();
   }, Math.floor(Math.random() *
@@ -104,6 +127,7 @@ function startAIMovement() {
 function resetGame() {
   gameState.players.forEach(p => { p.position = GAME_CONFIG.START_POSITION; p.ready = false; });
   gameState.aiPlayers.forEach(ai => { ai.position = GAME_CONFIG.START_POSITION; ai.ready = true; });
+  gameState.ropePosition = 0;
 
   if (gameState.countdownTimer) { clearInterval(gameState.countdownTimer); gameState.countdownTimer = null; }
   if (gameState.aiInterval) { clearInterval(gameState.aiInterval); gameState.aiInterval = null; }
@@ -194,7 +218,7 @@ async function startServer() {
 
     // ── Display screen: game type selector ─────────────────────────────────
     socket.on('setGameType', (type) => {
-      const allowed = ['sprint', 'cycling', 'swimming'];
+      const allowed = ['sprint', 'cycling', 'swimming', 'tugofwar'];
       if (!allowed.includes(type)) return;
       if (gameState.status !== 'waiting') return;  // can't change mid-race
       gameState.gameType = type;
@@ -242,6 +266,7 @@ async function startServer() {
         name: safeName,
         lane,
         color: GAME_CONFIG.COLORS[lane],
+        team: lane % 2 === 0 ? 'A' : 'B',
         ready: false,
         wins: 0
       });
@@ -257,6 +282,7 @@ async function startServer() {
               position: GAME_CONFIG.START_POSITION,
               lane: aiLane,
               color: GAME_CONFIG.COLORS[aiLane],
+              team: aiLane % 2 === 0 ? 'A' : 'B',
               ready: true,
               wins: 0,
               isAI: true
@@ -294,7 +320,26 @@ async function startServer() {
       lastMoveAt = now;
 
       const player = gameState.players.find(p => p.id === socket.id);
-      if (!player || player.position >= GAME_CONFIG.FINISH_LINE) return;
+      if (!player) return;
+
+      // ── Tug of War ──────────────────────────────────────────────────────
+      if (gameState.gameType === 'tugofwar') {
+        const dir = player.team === 'A' ? -1 : 1;
+        gameState.ropePosition = Math.max(
+          -TOW_CONFIG.WIN_THRESHOLD,
+          Math.min(TOW_CONFIG.WIN_THRESHOLD, gameState.ropePosition + dir * TOW_CONFIG.PULL_AMOUNT)
+        );
+        if (Math.abs(gameState.ropePosition) >= TOW_CONFIG.WIN_THRESHOLD) {
+          const winTeam = gameState.ropePosition < 0 ? 'A' : 'B';
+          allPlayers().filter(p => p.team === winTeam).forEach(p => p.wins++);
+          gameState.status = 'finished';
+        }
+        broadcastUpdate();
+        return;
+      }
+
+      // ── Racing games ────────────────────────────────────────────────────
+      if (player.position >= GAME_CONFIG.FINISH_LINE) return;
 
       player.position = Math.min(player.position + GAME_CONFIG.MOVE_AMOUNT, GAME_CONFIG.FINISH_LINE);
 

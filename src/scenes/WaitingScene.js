@@ -118,10 +118,11 @@ export default class WaitingScene extends Phaser.Scene {
         { key: 'sprint',   label: '🏃 Sprint' },
         { key: 'cycling',  label: '🚴 Cycling' },
         { key: 'swimming', label: '🏊 Swimming' },
+        { key: 'tugofwar', label: '🤝 Tug' },
       ]
       this._gameTypeBtns = {}
       games.forEach((g, i) => {
-        const btn = this.add.text(cx - 130 + i * 130, selectorY, g.label, {
+        const btn = this.add.text(cx - 180 + i * 120, selectorY, g.label, {
           fontSize: '15px', fontFamily: '"Arial Black", Arial',
           color: '#1a1a2e', backgroundColor: '#555555',
           padding: { x: 14, y: 8 },
@@ -237,10 +238,13 @@ export default class WaitingScene extends Phaser.Scene {
       this._destroyAllCharacters()
       const role = this.registry.get('clientRole')
       if (role === 'display') {
-        this.scene.start('Race', { players, gameState, gameType })
+        const displayScene = gameType === 'tugofwar' ? 'TugOfWar' : 'Race'
+        this.scene.start(displayScene, { players, gameState, gameType, ropePosition: data.ropePosition || 0 })
       } else {
-        const sceneKey = gameType === 'cycling' ? 'CyclingPlayer'
-          : gameType === 'swimming' ? 'SwimmingPlayer' : 'Player'
+        const sceneKey = gameType === 'cycling'  ? 'CyclingPlayer'
+          : gameType === 'swimming'  ? 'SwimmingPlayer'
+          : gameType === 'tugofwar'  ? 'TugOfWarPlayer'
+          : 'Player'
         this.scene.start(sceneKey, { gameData: data })
       }
       return
@@ -357,7 +361,7 @@ export default class WaitingScene extends Phaser.Scene {
 
   _highlightGameBtn(activeKey) {
     if (!this._gameTypeBtns) return
-    const colors = { sprint: '#e67e22', cycling: '#2ecc71', swimming: '#3498db' }
+    const colors = { sprint: '#e67e22', cycling: '#2ecc71', swimming: '#3498db', tugofwar: '#e74c3c' }
     Object.entries(this._gameTypeBtns).forEach(([key, btn]) => {
       const isActive = key === activeKey
       btn.setStyle({
