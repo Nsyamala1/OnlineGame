@@ -39,11 +39,18 @@ const gameState = {
   aiInterval: null,
   gameType: 'sprint',   // 'sprint' | 'cycling' | 'swimming' | 'tugofwar'
   ropePosition: 0,      // tugofwar: negative = Team A winning, positive = Team B winning
+  balloonBurstId: null, // balloon: socket id of the player who just burst (cleared after broadcast)
 };
 
 const TOW_CONFIG = {
   WIN_THRESHOLD: 400,
   PULL_AMOUNT: 28,
+};
+
+const BALLOON_CONFIG = {
+  MAX_SIZE: 100,
+  INFLATE_AMOUNT: 4,
+  BURST_COOLDOWN_MS: 150, // tapping faster than this causes a pop
 };
 
 const GAME_CONFIG = {
@@ -77,17 +84,39 @@ function allPlayers() {
 }
 
 function broadcastUpdate(extra = {}) {
+  const burstId = gameState.balloonBurstId;
+  gameState.balloonBurstId = null; // consume after one broadcast
   io.emit('updateGame', {
     players: allPlayers(),
     gameState: gameState.status,
     gameType: gameState.gameType,
     ropePosition: gameState.ropePosition,
+    burstId,
     ...extra
   });
 }
 
 function startAIMovement() {
   if (gameState.aiInterval) clearInterval(gameState.aiInterval);
+
+  // ── Balloon: AI taps at a steady safe rhythm (~4.5 taps/sec) ──────────────
+  if (gameState.gameType === 'balloon') {
+    gameState.aiInterval = setInterval(() => {
+      if (gameState.status !== 'racing') return;
+      gameState.aiPlayers.forEach(ai => {
+        // 80% chance to tap each tick → staggered natural feel
+        if (Math.random() > 0.2) {
+          ai.balloonSize = Math.min(BALLOON_CONFIG.MAX_SIZE, ai.balloonSize + BALLOON_CONFIG.INFLATE_AMOUNT);
+          if (ai.balloonSize >= BALLOON_CONFIG.MAX_SIZE) {
+            ai.wins++;
+            gameState.status = 'finished';
+          }
+        }
+      });
+      broadcastUpdate();
+    }, 220);
+    return;
+  }
 
   gameState.aiInterval = setInterval(() => {
     if (gameState.status !== 'racing') return;
@@ -125,9 +154,20 @@ function startAIMovement() {
 }
 
 function resetGame() {
-  gameState.players.forEach(p => { p.position = GAME_CONFIG.START_POSITION; p.ready = false; });
-  gameState.aiPlayers.forEach(ai => { ai.position = GAME_CONFIG.START_POSITION; ai.ready = true; });
+  gameState.players.forEach(p => {
+    p.position = GAME_CONFIG.START_POSITION;
+    p.ready = false;
+    p.balloonSize = 0;
+    p.lastBalloonTap = 0;
+  });
+  gameState.aiPlayers.forEach(ai => {
+    ai.position = GAME_CONFIG.START_POSITION;
+    ai.ready = true;
+    ai.balloonSize = 0;
+    ai.lastBalloonTap = 0;
+  });
   gameState.ropePosition = 0;
+  gameState.balloonBurstId = null;
 
   if (gameState.countdownTimer) { clearInterval(gameState.countdownTimer); gameState.countdownTimer = null; }
   if (gameState.aiInterval) { clearInterval(gameState.aiInterval); gameState.aiInterval = null; }
@@ -218,7 +258,7 @@ async function startServer() {
 
     // ── Display screen: game type selector ─────────────────────────────────
     socket.on('setGameType', (type) => {
-      const allowed = ['sprint', 'cycling', 'swimming', 'tugofwar'];
+      const allowed = ['sprint', 'cycling', 'swimming', 'tugofwar', 'balloon'];
       if (!allowed.includes(type)) return;
       if (gameState.status !== 'waiting') return;  // can't change mid-race
       gameState.gameType = type;
@@ -268,7 +308,9 @@ async function startServer() {
         color: GAME_CONFIG.COLORS[lane],
         team: lane % 2 === 0 ? 'A' : 'B',
         ready: false,
-        wins: 0
+        wins: 0,
+        balloonSize: 0,
+        lastBalloonTap: 0,
       });
 
       gameState.aiPlayers = [];
@@ -285,7 +327,9 @@ async function startServer() {
               team: aiLane % 2 === 0 ? 'A' : 'B',
               ready: true,
               wins: 0,
-              isAI: true
+              isAI: true,
+              balloonSize: 0,
+              lastBalloonTap: 0,
             });
           }
         }
@@ -314,8 +358,35 @@ async function startServer() {
     socket.on('move', () => {
       if (!isPlayer || gameState.status !== 'racing') return;
 
-      // ── Anti-cheat: enforce minimum time between moves ──────────────────
       const now = Date.now();
+
+      // ── Balloon Pop ─────────────────────────────────────────────────────────
+      if (gameState.gameType === 'balloon') {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (!player) return;
+
+        const elapsed = now - player.lastBalloonTap;
+        player.lastBalloonTap = now;
+
+        if (elapsed > 0 && elapsed < BALLOON_CONFIG.BURST_COOLDOWN_MS) {
+          // Tapped too fast — balloon bursts and resets to 0
+          player.balloonSize = 0;
+          gameState.balloonBurstId = player.id;
+        } else {
+          player.balloonSize = Math.min(
+            BALLOON_CONFIG.MAX_SIZE,
+            player.balloonSize + BALLOON_CONFIG.INFLATE_AMOUNT
+          );
+          if (player.balloonSize >= BALLOON_CONFIG.MAX_SIZE) {
+            player.wins++;
+            gameState.status = 'finished';
+          }
+        }
+        broadcastUpdate();
+        return;
+      }
+
+      // ── Anti-cheat: enforce minimum time between moves ──────────────────
       if (now - lastMoveAt < GAME_CONFIG.MOVE_COOLDOWN_MS) return; // drop silent
       lastMoveAt = now;
 
