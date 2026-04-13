@@ -119,13 +119,14 @@ export default class WaitingScene extends Phaser.Scene {
         { key: 'cycling',  label: '🚴 Cycling' },
         { key: 'swimming', label: '🏊 Swimming' },
         { key: 'tugofwar', label: '🤝 Tug' },
+        { key: 'balloon',  label: '🎈 Balloon' },
       ]
       this._gameTypeBtns = {}
       games.forEach((g, i) => {
-        const btn = this.add.text(cx - 180 + i * 120, selectorY, g.label, {
-          fontSize: '15px', fontFamily: '"Arial Black", Arial',
+        const btn = this.add.text(cx - 240 + i * 120, selectorY, g.label, {
+          fontSize: '14px', fontFamily: '"Arial Black", Arial',
           color: '#1a1a2e', backgroundColor: '#555555',
-          padding: { x: 14, y: 8 },
+          padding: { x: 10, y: 8 },
         }).setOrigin(0.5).setInteractive({ useHandCursor: true })
 
         btn.on('pointerdown', () => {
@@ -238,12 +239,15 @@ export default class WaitingScene extends Phaser.Scene {
       this._destroyAllCharacters()
       const role = this.registry.get('clientRole')
       if (role === 'display') {
-        const displayScene = gameType === 'tugofwar' ? 'TugOfWar' : 'Race'
+        const displayScene = gameType === 'tugofwar' ? 'TugOfWar'
+          : gameType === 'balloon'   ? 'BalloonDisplay'
+          : 'Race'
         this.scene.start(displayScene, { players, gameState, gameType, ropePosition: data.ropePosition || 0 })
       } else {
         const sceneKey = gameType === 'cycling'  ? 'CyclingPlayer'
           : gameType === 'swimming'  ? 'SwimmingPlayer'
           : gameType === 'tugofwar'  ? 'TugOfWarPlayer'
+          : gameType === 'balloon'   ? 'BalloonPlayer'
           : 'Player'
         this.scene.start(sceneKey, { gameData: data })
       }
@@ -361,7 +365,7 @@ export default class WaitingScene extends Phaser.Scene {
 
   _highlightGameBtn(activeKey) {
     if (!this._gameTypeBtns) return
-    const colors = { sprint: '#e67e22', cycling: '#2ecc71', swimming: '#3498db', tugofwar: '#e74c3c' }
+    const colors = { sprint: '#e67e22', cycling: '#2ecc71', swimming: '#3498db', tugofwar: '#e74c3c', balloon: '#9b59b6' }
     Object.entries(this._gameTypeBtns).forEach(([key, btn]) => {
       const isActive = key === activeKey
       btn.setStyle({
