@@ -241,7 +241,18 @@ export default class TugOfWarScene extends Phaser.Scene {
       this._finishShown = true
       if (socket) socket.off('updateGame')
       Object.values(this._characters).forEach(ch => { try { ch.stopRunning() } catch(e) {} })
-      this._showFinish(ropePosition, players)
+      const winTeam = ropePosition <= 0 ? 'A' : 'B'
+      const winner = [...players].filter(p => p.team === winTeam).sort((a, b) => b.wins - a.wins)[0] || players[0]
+      this.time.delayedCall(800, () => {
+        this.scene.start('Finish', {
+          players, winner,
+          olympicsRoundComplete: data.olympicsRoundComplete || false,
+          olympicsComplete: data.olympicsComplete || false,
+          olympicsRound: data.olympicsRound || 0,
+          olympicsTotal: data.olympicsTotal || 5,
+          nextMode: data.nextMode || null,
+        })
+      })
     }
   }
 

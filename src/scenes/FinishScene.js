@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { getSocket, disconnect } from '../socket.js'
 import PlayerCharacter from '../PlayerCharacter.js'
+import { SoundManager } from '../SoundManager.js'
 
 const FINISH_LINE = 2000
 const MEDALS = ['🥇', '🥈', '🥉']
@@ -14,6 +15,11 @@ export default class FinishScene extends Phaser.Scene {
     this._players = data.players || []
     this._winner = data.winner || (this._players[0] || null)
     this._winnerCharacter = null
+    this._olympicsRoundComplete = data.olympicsRoundComplete || false
+    this._olympicsComplete = data.olympicsComplete || false
+    this._olympicsRound = data.olympicsRound || 0
+    this._olympicsTotal = data.olympicsTotal || 5
+    this._nextMode = data.nextMode || null
   }
 
   create() {
@@ -23,10 +29,24 @@ export default class FinishScene extends Phaser.Scene {
 
     this._drawBackground(width, height)
     this._launchConfetti(width, height)
+    SoundManager.finish()
+
+    if (this._olympicsComplete) {
+      this._showOlympicsChampion(cx, cy, width, height)
+      this._createButtons(cx, height)
+      return
+    }
+
     this._showWinnerAnnouncement(cx, cy)
     this._showStandings(cx, cy, width, height)
     this._spawnWinnerCharacter(cx, cy)
-    this._createButtons(cx, height)
+
+    if (this._olympicsRoundComplete) {
+      this._showOlympicsNextRound(cx, height)
+      this._listenForNextRound()
+    } else {
+      this._createButtons(cx, height)
+    }
   }
 
   _drawBackground(width, height) {
@@ -222,6 +242,102 @@ export default class FinishScene extends Phaser.Scene {
       isMe: false,
     })
     this._winnerCharacter.playVictory()
+  }
+
+  _showOlympicsNextRound(cx, height) {
+    const modeLabels = { sprint: '🏃 Sprint', cycling: '🚴 Cycling', swimming: '🏊 Swimming', tugofwar: '🤝 Tug of War', balloon: '🎈 Balloon Pop' }
+    const roundLabel = `Round ${this._olympicsRound} / ${this._olympicsTotal} complete`
+    const nextLabel = `Next: ${modeLabels[this._nextMode] || this._nextMode}`
+
+    const bg = this.add.graphics()
+    bg.fillStyle(0x000000, 0.7)
+    bg.fillRoundedRect(cx - 200, height - 120, 400, 100, 14)
+    bg.setDepth(200)
+
+    this.add.text(cx, height - 95, roundLabel, {
+      fontSize: '14px', fontFamily: 'Arial', color: '#f1c40f',
+    }).setOrigin(0.5).setDepth(201)
+
+    this.add.text(cx, height - 72, nextLabel, {
+      fontSize: '20px', fontFamily: '"Arial Black", Arial', color: '#ffffff',
+    }).setOrigin(0.5).setDepth(201)
+
+    this._countdownTxt = this.add.text(cx, height - 44, 'Starting in 5…', {
+      fontSize: '13px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.6)',
+    }).setOrigin(0.5).setDepth(201)
+
+    let secs = 5
+    this._nextRoundTimer = this.time.addEvent({
+      delay: 1000, repeat: 4,
+      callback: () => {
+        secs--
+        if (this._countdownTxt) this._countdownTxt.setText(`Starting in ${secs}…`)
+      },
+    })
+  }
+
+  _listenForNextRound() {
+    const socket = getSocket()
+    if (!socket) return
+    socket.off('updateGame')
+    socket.on('updateGame', (data) => {
+      if (data.gameState === 'countdown' || data.gameState === 'racing') {
+        socket.off('updateGame')
+        this.registry.set('initialGameData', data)
+        this.scene.start('Waiting')
+      }
+    })
+  }
+
+  _showOlympicsChampion(cx, cy, width, height) {
+    const sorted = [...this._players].sort((a, b) => b.wins - a.wins)
+    const champion = sorted[0]
+
+    this.add.text(cx, cy * 0.3, '🏅 OLYMPICS COMPLETE! 🏅', {
+      fontSize: '32px', fontFamily: '"Arial Black", Arial',
+      color: '#f1c40f', stroke: '#000', strokeThickness: 5,
+    }).setOrigin(0.5).setDepth(10)
+
+    if (champion) {
+      this.add.text(cx, cy * 0.55, `🥇 CHAMPION: ${champion.name}`, {
+        fontSize: '26px', fontFamily: '"Arial Black", Arial',
+        color: champion.color || '#f1c40f', stroke: '#000', strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(10)
+    }
+
+    // Overall leaderboard
+    const panelW = Math.min(340, width * 0.8)
+    const panelX = cx - panelW / 2
+    const panelY = cy * 0.7
+    const bg = this.add.graphics()
+    bg.fillStyle(0x000000, 0.55)
+    bg.fillRoundedRect(panelX, panelY, panelW, 30 + sorted.length * 44, 12)
+    bg.setDepth(10)
+
+    this.add.text(cx, panelY + 16, 'OVERALL STANDINGS', {
+      fontSize: '14px', fontFamily: '"Arial Black", Arial', color: '#f1c40f',
+    }).setOrigin(0.5).setDepth(11)
+
+    sorted.forEach((p, i) => {
+      const rowY = panelY + 42 + i * 44
+      const colorInt = Phaser.Display.Color.HexStringToColor(p.color).color
+      const medals = ['🥇', '🥈', '🥉']
+      this.add.circle(panelX + 22, rowY + 4, 8, colorInt).setDepth(11)
+      this.add.text(panelX + 38, rowY + 4, `${medals[i] || (i + 1) + '.'} ${p.name}${p.isAI ? ' 🤖' : ''}`, {
+        fontSize: '15px', fontFamily: 'Arial', color: '#fff',
+      }).setOrigin(0, 0.5).setDepth(11)
+      this.add.text(panelX + panelW - 14, rowY + 4, `🏆×${p.wins}`, {
+        fontSize: '14px', fontFamily: 'Arial', color: '#f1c40f',
+      }).setOrigin(1, 0.5).setDepth(11)
+    })
+
+    if (champion) {
+      new PlayerCharacter(this, cx, cy * 1.65, {
+        color: champion.color || '#f1c40f',
+        name: champion.name,
+        wins: champion.wins,
+      }).playVictory()
+    }
   }
 
   _createButtons(cx, height) {

@@ -148,7 +148,16 @@ export default class BalloonDisplayScene extends Phaser.Scene {
       if (socket) socket.off('updateGame')
       const winner = players.find(p => (p.balloonSize || 0) >= BALLOON_MAX_SIZE)
         || [...players].sort((a, b) => (b.balloonSize || 0) - (a.balloonSize || 0))[0]
-      this._showFinish(winner)
+      this.time.delayedCall(800, () => {
+        this.scene.start('Finish', {
+          players, winner,
+          olympicsRoundComplete: data.olympicsRoundComplete || false,
+          olympicsComplete: data.olympicsComplete || false,
+          olympicsRound: data.olympicsRound || 0,
+          olympicsTotal: data.olympicsTotal || 5,
+          nextMode: data.nextMode || null,
+        })
+      })
     }
   }
 

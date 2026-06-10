@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { getSocket, disconnect } from '../socket.js'
 import PlayerCharacter from '../PlayerCharacter.js'
+import { SoundManager } from '../SoundManager.js'
 
 export default class WaitingScene extends Phaser.Scene {
   constructor() {
@@ -100,8 +101,21 @@ export default class WaitingScene extends Phaser.Scene {
     }
 
     // Hide ready button and show spectator badge for display clients
-    const isDisplay = this.registry.get('clientRole') === 'display'
+    const role = this.registry.get('clientRole')
+    const isDisplay = role === 'display'
+    const isSpectator = role === 'spectator'
+
+    if (isSpectator) {
+      this.add.text(cx, height - 100, '👁️  SPECTATOR MODE', {
+        fontSize: '16px', fontFamily: '"Arial Black", Arial',
+        color: '#9b59b6', backgroundColor: 'rgba(155,89,182,0.15)',
+        padding: { x: 16, y: 10 },
+      }).setOrigin(0.5)
+    }
+
     if (isDisplay) {
+      this._createRoomCodePanel(width, height)
+
       this.add.text(cx, height - 100, '📺  DISPLAY MODE  —  Spectating', {
         fontSize: '16px', fontFamily: '"Arial Black", Arial',
         color: '#3498db', backgroundColor: 'rgba(52,152,219,0.15)',
@@ -114,12 +128,32 @@ export default class WaitingScene extends Phaser.Scene {
         fontSize: '14px', fontFamily: 'Arial', color: 'rgba(255,255,255,0.5)',
       }).setOrigin(0, 0.5)
 
+      // Olympics toggle
+      this._olympicsBtn = this.add.text(cx + 200, selectorY, '🏅 Olympics OFF', {
+        fontSize: '13px', fontFamily: '"Arial Black", Arial',
+        color: '#aaaaaa', backgroundColor: '#333333',
+        padding: { x: 10, y: 8 },
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+
+      this._olympicsEnabled = false
+      this._olympicsBtn.on('pointerdown', () => {
+        this._olympicsEnabled = !this._olympicsEnabled
+        const socket = getSocket()
+        if (socket) socket.emit('setOlympicsMode', this._olympicsEnabled)
+        this._olympicsBtn.setText(this._olympicsEnabled ? '🏅 Olympics ON' : '🏅 Olympics OFF')
+        this._olympicsBtn.setStyle({
+          color: this._olympicsEnabled ? '#1a1a2e' : '#aaaaaa',
+          backgroundColor: this._olympicsEnabled ? '#f1c40f' : '#333333',
+        })
+      })
+
       const games = [
         { key: 'sprint',   label: '🏃 Sprint' },
         { key: 'cycling',  label: '🚴 Cycling' },
         { key: 'swimming', label: '🏊 Swimming' },
         { key: 'tugofwar', label: '🤝 Tug' },
         { key: 'balloon',  label: '🎈 Balloon' },
+        { key: 'eating',   label: '🍕 Eating' },
       ]
       this._gameTypeBtns = {}
       games.forEach((g, i) => {
@@ -154,7 +188,7 @@ export default class WaitingScene extends Phaser.Scene {
     this._readyBtn.on('pointerout', () => {
       if (!this._isReady) this._readyBtn.setStyle({ backgroundColor: '#f1c40f' })
     })
-    this._readyBtn.setVisible(!isDisplay)
+    this._readyBtn.setVisible(!isDisplay && !isSpectator)
     this._readyBtn.on('pointerdown', () => this._toggleReady())
 
     // Leave button
@@ -170,26 +204,9 @@ export default class WaitingScene extends Phaser.Scene {
       window.location.reload()
     })
 
-    // Invite section (shown when alone)
+    // Invite section — hidden, kept for compat
     this._inviteSection = this.add.container(cx, height * 0.88)
     this._inviteSection.setVisible(false)
-
-    const inviteText = this.add.text(0, 0, `Invite friends: ${window.location.hostname}:3000`, {
-      fontSize: '13px',
-      fontFamily: 'Arial',
-      color: '#aaaaaa',
-    }).setOrigin(0.5)
-
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(`http://${window.location.hostname}:3000`)}`
-    this.load.image('qr_code', qrUrl)
-    this.load.once('complete', () => {
-      if (this._qrImage) this._qrImage.destroy()
-      this._qrImage = this.add.image(0, -50, 'qr_code').setOrigin(0.5)
-      this._inviteSection.add(this._qrImage)
-    })
-    this.load.start()
-
-    this._inviteSection.add(inviteText)
 
     // Countdown overlay (hidden by default)
     this._countdownOverlay = this.add.container(cx, height / 2)
@@ -207,10 +224,56 @@ export default class WaitingScene extends Phaser.Scene {
     this._countdownOverlay.add([this._countdownBg, this._countdownText])
   }
 
+  _createRoomCodePanel(width, height) {
+    const roomCode = this.registry.get('roomCode') || '????'
+    const joinUrl = `${window.location.origin}?room=${roomCode}`
+
+    // Panel background
+    const panelX = 20
+    const panelY = 100
+    const panelW = 180
+    const panelH = 220
+    const bg = this.add.graphics()
+    bg.fillStyle(0x000000, 0.5)
+    bg.fillRoundedRect(panelX, panelY, panelW, panelH, 12)
+    bg.lineStyle(2, 0xf1c40f, 0.6)
+    bg.strokeRoundedRect(panelX, panelY, panelW, panelH, 12)
+
+    this.add.text(panelX + panelW / 2, panelY + 18, 'JOIN GAME', {
+      fontSize: '12px', fontFamily: '"Arial Black", Arial',
+      color: '#f1c40f',
+    }).setOrigin(0.5)
+
+    // Room code — large letters
+    this.add.text(panelX + panelW / 2, panelY + 50, roomCode, {
+      fontSize: '36px', fontFamily: '"Arial Black", Arial',
+      color: '#ffffff',
+      stroke: '#000', strokeThickness: 3,
+      letterSpacing: 6,
+    }).setOrigin(0.5)
+
+    this.add.text(panelX + panelW / 2, panelY + 80, 'scan or enter code', {
+      fontSize: '10px', fontFamily: 'Arial',
+      color: 'rgba(255,255,255,0.5)',
+    }).setOrigin(0.5)
+
+    // QR code
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(joinUrl)}`
+    const qrKey = `qr_${roomCode}`
+    this.load.image(qrKey, qrUrl)
+    this.load.once('complete', () => {
+      this.add.image(panelX + panelW / 2, panelY + 155, qrKey)
+        .setDisplaySize(100, 100)
+        .setOrigin(0.5)
+    })
+    this.load.start()
+  }
+
   _toggleReady() {
     const socket = getSocket()
     if (!socket) return
     this._isReady = !this._isReady
+    SoundManager.ready()
 
     if (this._isReady) {
       this._readyBtn.setText('  ✓ READY!  ')
@@ -224,10 +287,11 @@ export default class WaitingScene extends Phaser.Scene {
   }
 
   _onUpdateGame(data) {
-    const { players, gameState, gameType, countdown } = data
+    const { players, gameState, gameType, countdown, roomCode } = data
     const socket = getSocket()
     const myId = socket ? socket.id : null
 
+    if (roomCode) this.registry.set('roomCode', roomCode)
     // Keep gameType in registry so buttons stay highlighted correctly
     if (gameType) this.registry.set('gameType', gameType)
 
@@ -248,6 +312,7 @@ export default class WaitingScene extends Phaser.Scene {
           : gameType === 'swimming'  ? 'SwimmingPlayer'
           : gameType === 'tugofwar'  ? 'TugOfWarPlayer'
           : gameType === 'balloon'   ? 'BalloonPlayer'
+          : gameType === 'eating'    ? 'EatingPlayer'
           : 'Player'
         this.scene.start(sceneKey, { gameData: data })
       }
@@ -266,9 +331,7 @@ export default class WaitingScene extends Phaser.Scene {
     // Update player list panel
     this._updatePlayerList(players)
 
-    // Show/hide invite section
-    const humanCount = players.filter(p => !p.isAI).length
-    this._inviteSection.setVisible(humanCount <= 1)
+    // invite section kept but hidden (replaced by persistent room code panel)
 
     // Update ready button state
     const myPlayer = players.find(p => p.id === myId)
@@ -334,6 +397,7 @@ export default class WaitingScene extends Phaser.Scene {
   _showCountdown(count) {
     if (count === undefined || count === null) return
 
+    SoundManager.countdown(count)
     this._countdownOverlay.setVisible(true)
     this._countdownText.setText(String(count))
     this._countdownText.setScale(1)
@@ -365,7 +429,7 @@ export default class WaitingScene extends Phaser.Scene {
 
   _highlightGameBtn(activeKey) {
     if (!this._gameTypeBtns) return
-    const colors = { sprint: '#e67e22', cycling: '#2ecc71', swimming: '#3498db', tugofwar: '#e74c3c', balloon: '#9b59b6' }
+    const colors = { sprint: '#e67e22', cycling: '#2ecc71', swimming: '#3498db', tugofwar: '#e74c3c', balloon: '#9b59b6', eating: '#f39c12' }
     Object.entries(this._gameTypeBtns).forEach(([key, btn]) => {
       const isActive = key === activeKey
       btn.setStyle({

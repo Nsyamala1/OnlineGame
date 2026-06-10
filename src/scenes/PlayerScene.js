@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { getSocket, disconnect } from '../socket.js'
 import PlayerCharacter from '../PlayerCharacter.js'
+import { SoundManager } from '../SoundManager.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PlayerScene  —  iPad / phone controller screen
@@ -446,6 +447,7 @@ export default class PlayerScene extends Phaser.Scene {
       // ✅ Valid step
       this._lastSide = side
       getSocket()?.emit('move')
+      SoundManager.tap()
       this._flashValid(side, x, y)
       this._highlightNext(side === 'left' ? 'right' : 'left')
     } else {
