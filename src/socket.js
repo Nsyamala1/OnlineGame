@@ -4,7 +4,8 @@ let _socket = null
 
 export function connect() {
   if (_socket && _socket.connected) return _socket
-  _socket = io(`http://${window.location.hostname}:3001`, {
+  const serverUrl = import.meta.env.VITE_SERVER_URL || `http://${window.location.hostname}:3001`
+  _socket = io(serverUrl, {
     transports: ['polling', 'websocket'],
     reconnection: true,
     reconnectionAttempts: 5,

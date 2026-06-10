@@ -445,7 +445,14 @@ export default class RaceScene extends Phaser.Scene {
       const winner = [...players].sort((a, b) => b.position - a.position)[0]
       if (socket) socket.off('updateGame')
       this._destroyAllCharacters()
-      this.scene.start('Finish', { players, winner })
+      this.scene.start('Finish', {
+        players, winner,
+        olympicsRoundComplete: data.olympicsRoundComplete || false,
+        olympicsComplete: data.olympicsComplete || false,
+        olympicsRound: data.olympicsRound || 0,
+        olympicsTotal: data.olympicsTotal || 5,
+        nextMode: data.nextMode || null,
+      })
     }
   }
 
