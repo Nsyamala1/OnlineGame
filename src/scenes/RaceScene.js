@@ -332,6 +332,7 @@ export default class RaceScene extends Phaser.Scene {
         color: p.color, name: p.name, wins: p.wins, isMe: p.id === myId,
       })
       ch.playIdle()
+      if (this._gameType === 'cycling') ch.equipBike()
       this._characters[p.id]    = ch
       this._prevPositions[p.id] = worldX
 
@@ -405,6 +406,7 @@ export default class RaceScene extends Phaser.Scene {
         const ch    = new PlayerCharacter(this, p.position || START_POSITION, laneY, {
           color: p.color, name: p.name, wins: p.wins, isMe: p.id === myId,
         })
+        if (this._gameType === 'cycling') ch.equipBike()
         this._characters[p.id]    = ch
         this._prevPositions[p.id] = p.position || START_POSITION
         if (p.id === myId) this.cameras.main.startFollow(ch.posContainer, true, 0.08, 0)
@@ -417,14 +419,18 @@ export default class RaceScene extends Phaser.Scene {
       ch.moveTo(newX)
 
       if (gameState === 'racing') {
-        newX > prevX ? ch.startRunning() : ch.stopRunning()
+        if (this._gameType === 'cycling') {
+          newX > prevX ? ch.startCycling() : ch.stopCycling()
+        } else {
+          newX > prevX ? ch.startRunning() : ch.stopRunning()
+        }
 
         // Splash particle at character when they move (swimming only)
         if (this._gameType === 'swimming' && newX > prevX) {
           this._spawnSplash(newX, this._trackTop + (p.lane + 0.5) * this._laneHeight)
         }
       } else {
-        ch.stopRunning()
+        this._gameType === 'cycling' ? ch.stopCycling() : ch.stopRunning()
       }
 
       this._prevPositions[p.id] = newX

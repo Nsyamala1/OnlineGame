@@ -365,12 +365,170 @@ export default class PlayerCharacter {
     }
   }
 
+  // ─── Cycling / Bike ──────────────────────────────────────────────────────
+
+  /** Attach a procedural bicycle to the character for cycling mode */
+  equipBike() {
+    if (this._bikeEquipped) return
+    this._bikeEquipped = true
+    const s = this.isMe ? 1.15 : 1.0
+    const c = Phaser.Display.Color.HexStringToColor(this.color).color
+
+    // Lean body forward for cycling posture
+    this.bodyContainer.angle = -22
+    this.leftArm.angle  = -68
+    this.rightArm.angle = -68
+
+    // Bike geometry relative to posContainer origin
+    const bwX = -18 * s, bwY = 16 * s  // back wheel centre
+    const fwX =  18 * s, fwY = 16 * s  // front wheel centre
+    const wR  =  13 * s                  // wheel radius
+    const bbX =  -2 * s, bbY = 12 * s  // bottom bracket (crank centre)
+    const sX  = -11 * s, sY  = -6 * s  // seat junction
+    const hX  =   9 * s, hY  = -6 * s  // head-tube top
+
+    this._bike = { bwX, bwY, fwX, fwY, wR, bbX, bbY, s }
+
+    // Static frame — inserted behind the rider body
+    const fg = this.scene.add.graphics()
+    this._bikeFrameG = fg
+    this.posContainer.addAt(fg, 0)
+
+    // Wheels
+    fg.lineStyle(2.5 * s, 0x222222, 1)
+    fg.strokeCircle(bwX, bwY, wR)
+    fg.strokeCircle(fwX, fwY, wR)
+    fg.lineStyle(1.0 * s, 0x555555, 0.35)
+    fg.strokeCircle(bwX, bwY, wR - 2 * s)
+    fg.strokeCircle(fwX, fwY, wR - 2 * s)
+    fg.fillStyle(0x555555, 1)
+    fg.fillCircle(bwX, bwY, 2.5 * s)
+    fg.fillCircle(fwX, fwY, 2.5 * s)
+
+    // Coloured frame tubes
+    fg.lineStyle(2.5 * s, c, 1)
+    fg.lineBetween(sX, sY, bbX, bbY)        // seat tube
+    fg.lineBetween(sX, sY, hX,  hY)         // top tube
+    fg.lineBetween(hX, hY, bbX, bbY)        // down tube
+    fg.lineBetween(bbX, bbY, bwX, bwY)      // chain stay
+    fg.lineBetween(sX,  sY,  bwX, bwY)      // seat stay
+    fg.lineBetween(hX,  hY,  fwX, fwY)      // fork
+    fg.lineStyle(3.0 * s, c, 1)
+    fg.lineBetween(hX, hY, hX + 1 * s, hY + 9 * s)  // head tube
+
+    // Handlebar
+    fg.lineStyle(2 * s, 0x555555, 1)
+    fg.lineBetween(hX, hY, hX - 2 * s, hY - 9 * s)
+    fg.lineBetween(hX - 7 * s, hY - 9 * s, hX + 4 * s, hY - 9 * s)
+
+    // Saddle
+    fg.lineStyle(2 * s, 0x555555, 1)
+    fg.lineBetween(sX - 7 * s, sY - 4 * s, sX + 4 * s, sY - 4 * s)
+    fg.lineBetween(sX - 2 * s, sY - 4 * s, sX, sY)
+
+    // Animated layer (spokes + crank) — in front of rider
+    const ag = this.scene.add.graphics()
+    this._bikeAnimG = ag
+    this.posContainer.add(ag)
+
+    this._bikeAngle = 0
+    this._drawBikeAnim()
+  }
+
+  _drawBikeAnim() {
+    const g = this._bikeAnimG
+    if (!g || !this._bike) return
+    const { bwX, bwY, fwX, fwY, wR, bbX, bbY, s } = this._bike
+    const a = this._bikeAngle
+    g.clear()
+
+    // 3 spokes per wheel, rotating with crank
+    g.lineStyle(1.2 * s, 0x999999, 0.7)
+    for (let i = 0; i < 3; i++) {
+      const sp = a + (i * Math.PI * 2 / 3)
+      g.lineBetween(bwX + Math.cos(sp) * wR, bwY + Math.sin(sp) * wR,
+                    bwX - Math.cos(sp) * wR, bwY - Math.sin(sp) * wR)
+      g.lineBetween(fwX + Math.cos(sp + 0.5) * wR, fwY + Math.sin(sp + 0.5) * wR,
+                    fwX - Math.cos(sp + 0.5) * wR, fwY - Math.sin(sp + 0.5) * wR)
+    }
+
+    // Chainring
+    g.lineStyle(1.5 * s, 0x888888, 0.7)
+    g.strokeCircle(bbX, bbY, 6.5 * s)
+
+    // Crank arm
+    const cl = 8 * s
+    const lpX = bbX + Math.cos(a) * cl, lpY = bbY + Math.sin(a) * cl
+    const rpX = bbX + Math.cos(a + Math.PI) * cl, rpY = bbY + Math.sin(a + Math.PI) * cl
+    g.lineStyle(2.5 * s, 0x444444, 1)
+    g.lineBetween(lpX, lpY, rpX, rpY)
+
+    // Pedals (perpendicular to crank arm)
+    const pa = a + Math.PI / 2
+    const pl = 5 * s
+    g.lineStyle(2.5 * s, 0x222222, 1)
+    g.lineBetween(lpX + Math.cos(pa) * pl, lpY + Math.sin(pa) * pl,
+                  lpX - Math.cos(pa) * pl, lpY - Math.sin(pa) * pl)
+    g.lineBetween(rpX + Math.cos(pa) * pl, rpY + Math.sin(pa) * pl,
+                  rpX - Math.cos(pa) * pl, rpY - Math.sin(pa) * pl)
+  }
+
+  /** Start pedalling animation */
+  startCycling() {
+    if (this._cycling) return
+    this._cycling = true
+    this._stopBodyBob()
+
+    // Gentle vertical bob while pedalling
+    const bobT = this.scene.tweens.add({
+      targets: this.bodyContainer,
+      y: { from: 0, to: -3 },
+      duration: 300,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    })
+    this.activeTweens.push(bobT)
+
+    // Crank counter drives spokes + leg animation
+    const crankT = this.scene.tweens.addCounter({
+      from: 0,
+      to: Math.PI * 2,
+      duration: 550,
+      repeat: -1,
+      onUpdate: (tw) => {
+        this._bikeAngle = tw.getValue()
+        this._drawBikeAnim()
+        const ang = this._bikeAngle
+        this.leftLeg.angle  =  Math.sin(ang) * 48
+        this.rightLeg.angle = -Math.sin(ang) * 48
+      },
+    })
+    this.activeTweens.push(crankT)
+
+    if (this.dustEmitter) this.dustEmitter.start()
+  }
+
+  /** Stop pedalling, keep bike visible */
+  stopCycling() {
+    if (!this._cycling) return
+    this._cycling = false
+    this._clearActiveTweens()
+    this.leftLeg.angle  = 0
+    this.rightLeg.angle = 0
+    this.bodyContainer.y = 0
+    this._drawBikeAnim()
+    if (this.dustEmitter) this.dustEmitter.stop()
+  }
+
   /** Stop tweens and destroy everything */
   destroy() {
     this._clearActiveTweens()
     if (this.dustEmitter) {
       try { this.dustEmitter.destroy() } catch (e) {}
     }
+    if (this._bikeFrameG) { try { this._bikeFrameG.destroy() } catch (e) {} }
+    if (this._bikeAnimG)  { try { this._bikeAnimG.destroy()  } catch (e) {} }
     try { this.posContainer.destroy(true) } catch (e) {}
   }
 
